@@ -65,11 +65,42 @@ impl Network {
   }
 
   fn feed_forward(&mut self, layers: &mut Vec<Vec<f32>>) {
-    unimplemented!()
+    use ::mmul;
+    for window in (0..layers.len()).collect::<Vec<_>>().windows(2) {
+      let (it, jt) = (window[0], window[1]);
+      // let (inl, mut outl) = (&layers[it], &mut layers[jt]);
+      let inl_ptr = layers[it].as_ptr();
+      let outl_ptr = layers[it].as_mut_ptr();
+      unsafe {
+        mmul::sgemm(
+          1,
+          layers[it].len(),
+          layers[jt].len(),
+          self.activation_coeffs[it],
+          inl_ptr,
+          1,
+          1,
+          self.weights[it].as_ptr(),
+          1,
+          1,
+          0.0,
+          outl_ptr,
+          1,
+          1
+        );
+      }
+      for net in layers[jt].iter_mut() {
+        *net = Network::sigmoid(*net);
+      }
+    }
+  }
+
+  fn sigmoid(t: f32) -> f32 {
+    1.0 / (1.0 + (-t).exp())
   }
 
   fn backpropagate(&mut self, layers: &mut Vec<Vec<f32>>, out_layer_err: &[f32], conf: &TrainConfig) {
-    unimplemented!()
+
   }
 
   pub fn write(&self, filename: &str) {
