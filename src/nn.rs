@@ -54,12 +54,12 @@ impl Network {
       for &(ref input, ref output) in &train_data {
         layers[0] = input.clone();
         self.feed_forward(&mut layers);
-        let out_layer_err = layers.last().unwrap()
+        let mut out_layer_err = layers.last().unwrap()
           .iter()
           .zip(output)
-          .map(|(y, o)| o - y)
+          .map(|(y, o)| (o - y)*(o - y))
           .collect::<Vec<_>>();
-        self.backpropagate(&mut layers, &out_layer_err, conf);
+        self.backpropagate(&mut layers, &mut out_layer_err, conf);
       }
     }
   }
@@ -95,12 +95,19 @@ impl Network {
     }
   }
 
+  fn backpropagate(&mut self, layers: &mut Vec<Vec<f32>>, out_layer_err: &mut [f32], conf: &TrainConfig) {
+    // NOTE(msniegocki): the initial net activation can be reused due
+    // the useful derivative propperty of the sigmoid function
+    let nets: Vec<f32> = out_layer_err.iter().map(|x| x * (1.0 - x)).collect();
+    let delta = out_layer_err.iter().map(|e| e * sigmoid_prime());
+  }
+
   fn sigmoid(t: f32) -> f32 {
     1.0 / (1.0 + (-t).exp())
   }
 
-  fn backpropagate(&mut self, layers: &mut Vec<Vec<f32>>, out_layer_err: &[f32], conf: &TrainConfig) {
-
+  fn sigmoid_prime(t: f32) -> f32 {
+    sigmoid(t) * (1.0 - sigmoid(t))
   }
 
   pub fn write(&self, filename: &str) {
