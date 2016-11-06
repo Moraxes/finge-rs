@@ -3,6 +3,7 @@
 extern crate bincode as bc;
 extern crate clap;
 extern crate matrixmultiply as mmul;
+extern crate nalgebra as na;
 extern crate rand;
 extern crate serde;
 extern crate serde_json as sj;
@@ -16,7 +17,7 @@ fn main() {
   use nn::*;
   use rand::{XorShiftRng, SeedableRng};
 
-  let mut net = Network::from_definition(vec![3, 4, 1], vec![1.0, 1.0, 1.0]);
+  let mut net = Network::from_definition(vec![3, 1], vec![1.0, 1.0]);
 
   let mut rng = XorShiftRng::from_seed(rand::random());
   let train_data = (0..100).map(|_| {
@@ -43,7 +44,7 @@ fn main() {
         1.0,
       ],
       vec![
-        if a != b { 1.0 } else { 0.0 },
+        if a && b { 1.0 } else { 0.0 },
       ]
     )
   }).collect::<Vec<_>>();
@@ -54,8 +55,13 @@ fn main() {
     momentum_rate: 0.0,
     validation_ratio: 0.0,
     sequential_validation_failures_required: 5,
-    max_epochs: None,
+    max_epochs: Some(1000),
   });
 
-  println!("{:?}", net.eval(&[1.0, 1.0, 1.0]));
+  for it in (-50..51isize).map(|x| x as f32 / 50.0) {
+    for jt in (-50..51isize).map(|x| x as f32 / 50.0) {
+      print!("{}", if net.eval(na::DVector::from_slice(3, &[it, jt, 1.0]))[0] > 0.5 {'#'} else {'.'});
+    }
+    print!("\n");
+  }
 }
