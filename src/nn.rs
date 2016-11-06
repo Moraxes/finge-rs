@@ -49,6 +49,7 @@ impl Network {
       unsafe { v.set_len(self.layer_sizes[it]); }
       v
     }).collect::<Vec<_>>();
+    let mut delta = layers.clone();
 
     while epochs_since_validation_improvement < conf.sequential_validation_failures_required {
       for &(ref input, ref output) in &train_data {
@@ -59,7 +60,7 @@ impl Network {
           .zip(output)
           .map(|(y, o)| (o - y)*(o - y))
           .collect::<Vec<_>>();
-        self.backpropagate(&mut layers, &mut out_layer_err, conf);
+        self.backpropagate(&mut layers, &mut out_layer_err, &mut delta, conf);
       }
     }
   }
@@ -95,11 +96,45 @@ impl Network {
     }
   }
 
-  fn backpropagate(&mut self, layers: &mut Vec<Vec<f32>>, out_layer_err: &mut [f32], conf: &TrainConfig) {
+  fn backpropagate(&mut self, layers: &mut Vec<Vec<f32>>, out_layer_err: &mut [f32], delta: &mut Vec<Vec<f32>>, conf: &TrainConfig) {
+    use ::mmul;
     // NOTE(msniegocki): the initial net activation can be reused due
     // the useful derivative propperty of the sigmoid function
-    let nets: Vec<f32> = out_layer_err.iter().map(|x| x * (1.0 - x)).collect();
-    let delta = out_layer_err.iter().map(|e| e * sigmoid_prime());
+    for layer in layers.iter_mut() {
+      for (out, coeff) in layer.iter_mut().zip(&self.activation_coeffs) {
+        *out = *out * (1.0 - *out) * coeff;
+      }
+    }
+
+    *delta.last_mut().unwrap() = out_layer_err
+        .iter()
+        .zip(layers.last().unwrap())
+        .map(|(e, fz)| e * fz)
+        .collect();
+    for it in (0..(layers.len() - 1)).rev() {
+      unsafe {
+        mmul::sgemm(
+          1,
+          delta[it+1].len(),
+          layers[it].len(),
+          1.0,
+          delta[it+1].as_ptr(),
+          1,
+          1,
+          self.weights[it].as_ptr(),
+          1,
+          1,
+          0.0,
+          delta[it].as_mut_ptr(),
+          1,
+          1
+        );
+      }
+    }
+  }
+
+  fn size_of_weights_before_layer(&self, it: usize) -> (usize, usize) {
+    (self.layer_sizes[it-1], self.layer_sizes[it])
   }
 
   fn sigmoid(t: f32) -> f32 {
@@ -107,7 +142,7 @@ impl Network {
   }
 
   fn sigmoid_prime(t: f32) -> f32 {
-    sigmoid(t) * (1.0 - sigmoid(t))
+    Network::sigmoid(t) * (1.0 - Network::sigmoid(t))
   }
 
   pub fn write(&self, filename: &str) {
