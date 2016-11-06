@@ -60,7 +60,8 @@ impl Network {
           .zip(output)
           .map(|(y, o)| (o - y)*(o - y))
           .collect::<Vec<_>>();
-        self.backpropagate(&mut layers, &mut out_layer_err, &mut delta, conf);
+        self.backpropagate(layers.clone(), &mut out_layer_err[..], &mut delta, conf);
+        // self.update_weights(&layers, &delta, conf);
       }
     }
   }
@@ -96,7 +97,7 @@ impl Network {
     }
   }
 
-  fn backpropagate(&mut self, layers: &mut Vec<Vec<f32>>, out_layer_err: &mut [f32], delta: &mut Vec<Vec<f32>>, conf: &TrainConfig) {
+  fn backpropagate(&mut self, mut layers: Vec<Vec<f32>>, out_layer_err: &mut [f32], delta: &mut Vec<Vec<f32>>, conf: &TrainConfig) {
     use ::mmul;
     // NOTE(msniegocki): the initial net activation can be reused due
     // the useful derivative propperty of the sigmoid function
