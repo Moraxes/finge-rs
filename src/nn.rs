@@ -52,6 +52,9 @@ impl Network {
     let mut delta = layers.clone();
 
     while epochs_since_validation_improvement < conf.sequential_validation_failures_required {
+      let mut train_error = 0.0;
+      let mut validation_error = ::std::f32::INFINITY;
+
       for &(ref input, ref output) in &train_data {
         layers[0] = input.clone();
         self.feed_forward(&mut layers);
@@ -60,13 +63,40 @@ impl Network {
           .zip(output)
           .map(|(y, o)| (o - y)*(o - y))
           .collect::<Vec<_>>();
-        self.backpropagate(layers.clone(), &mut out_layer_err[..], &mut delta, conf);
-        // self.update_weights(&layers, &delta, conf);
+        
+        train_error += out_layer_err.iter().sum::<f32>() / out_layer_err.len() as f32;
+        self.backpropagate(layers.clone(), &out_layer_err[..], &mut delta, conf);
+        self.update_weights(&layers, &delta, conf);
       }
+      
+      let new_validation_error = validation_data.iter()
+        .map(|ex| self.validation_error_of(&mut layers, &ex.0[..], &ex.1[..])).sum::<f32>();
+      if new_validation_error > validation_error {
+        epochs_since_validation_improvement += 1;
+      } else {
+        epochs_since_validation_improvement = 0;
+      }
+      validation_error = new_validation_error;
     }
   }
 
-  fn feed_forward(&mut self, layers: &mut Vec<Vec<f32>>) {
+  fn validation_error_of(&self, layers: &mut Vec<Vec<f32>>, example: &[f32], target: &[f32]) -> f32 {
+    assert_eq!(layers[0].len(), example.len());
+    assert_eq!(layers.last().unwrap().len(), target.len());
+    for (x, ex) in layers[0].iter_mut().zip(example) {
+      *x = *ex;
+    }
+
+    self.feed_forward(layers);
+    let out_layer_err = layers.last().unwrap()
+      .iter()
+      .zip(layers.last().unwrap())
+      .map(|(y, o)| (o - y)*(o - y))
+      .collect::<Vec<_>>();
+    out_layer_err.iter().sum::<f32>() / out_layer_err.len() as f32
+  }
+
+  fn feed_forward(&self, layers: &mut Vec<Vec<f32>>) {
     use ::mmul;
     for window in (0..layers.len()).collect::<Vec<_>>().windows(2) {
       let (it, jt) = (window[0], window[1]);
@@ -97,7 +127,7 @@ impl Network {
     }
   }
 
-  fn backpropagate(&mut self, mut layers: Vec<Vec<f32>>, out_layer_err: &mut [f32], delta: &mut Vec<Vec<f32>>, conf: &TrainConfig) {
+  fn backpropagate(&mut self, mut layers: Vec<Vec<f32>>, out_layer_err: &[f32], delta: &mut Vec<Vec<f32>>, conf: &TrainConfig) {
     use ::mmul;
     // NOTE(msniegocki): the initial net activation can be reused due
     // the useful derivative propperty of the sigmoid function
@@ -134,8 +164,30 @@ impl Network {
     }
   }
 
-  fn size_of_weights_before_layer(&self, it: usize) -> (usize, usize) {
-    (self.layer_sizes[it-1], self.layer_sizes[it])
+  fn update_weights(&mut self, layers: &Vec<Vec<f32>>, delta: &Vec<Vec<f32>>, conf: &TrainConfig) {
+    use ::mmul;
+
+    for it in 0..(layers.len() - 1) {
+      assert_eq!(self.weights[it].len(), delta[it].len() * layers[it].len());
+      unsafe {
+        mmul::sgemm(
+          delta[it].len(),
+          1,
+          layers[it+1].len(),
+          1.0,
+          delta[it].as_ptr(),
+          1,
+          1,
+          layers[it+1].as_ptr(),
+          1,
+          1,
+          conf.learning_rate,
+          self.weights[it].as_mut_ptr(),
+          1,
+          1
+        );
+      }
+    }
   }
 
   fn sigmoid(t: f32) -> f32 {
