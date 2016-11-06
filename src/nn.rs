@@ -83,17 +83,33 @@ impl Network {
   fn validation_error_of(&self, layers: &mut Vec<Vec<f32>>, example: &[f32], target: &[f32]) -> f32 {
     assert_eq!(layers[0].len(), example.len());
     assert_eq!(layers.last().unwrap().len(), target.len());
-    for (x, ex) in layers[0].iter_mut().zip(example) {
-      *x = *ex;
-    }
 
-    self.feed_forward(layers);
+    self.eval_impl(layers, example);
+    
     let out_layer_err = layers.last().unwrap()
       .iter()
-      .zip(layers.last().unwrap())
+      .zip(target)
       .map(|(y, o)| (o - y)*(o - y))
       .collect::<Vec<_>>();
     out_layer_err.iter().sum::<f32>() / out_layer_err.len() as f32
+  }
+
+  fn eval_impl(&self, layers: &mut Vec<Vec<f32>>, example: &[f32]) {
+    for (x, ex) in layers[0].iter_mut().zip(example) {
+      *x = *ex;
+    }
+    self.feed_forward(layers);
+  }
+
+  pub fn eval(&self, example: &[f32]) -> Vec<f32> {
+    let mut layers = (0..(self.layer_sizes.len())).map(|it| {
+      let mut v = Vec::with_capacity(self.layer_sizes[it]);
+      unsafe { v.set_len(self.layer_sizes[it]); }
+      v
+    }).collect::<Vec<_>>();
+    assert_eq!(layers[0].len(), example.len());
+    self.eval_impl(&mut layers, example);
+    layers.last().unwrap().clone()
   }
 
   fn feed_forward(&self, layers: &mut Vec<Vec<f32>>) {
@@ -168,7 +184,7 @@ impl Network {
     use ::mmul;
 
     for it in 0..(layers.len() - 1) {
-      assert_eq!(self.weights[it].len(), delta[it].len() * layers[it].len());
+      assert_eq!(self.weights[it].len(), delta[it+1].len() * layers[it].len());
       unsafe {
         mmul::sgemm(
           delta[it].len(),
