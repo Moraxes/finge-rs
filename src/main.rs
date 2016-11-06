@@ -58,8 +58,10 @@ fn main() {
     max_epochs: Some(1000),
   });
 
-  for it in (-50..51isize).map(|x| x as f32 / 50.0) {
-    for jt in (-50..51isize).map(|x| x as f32 / 50.0) {
+  // net.weights[1] = na::DMatrix::from_column_vector(3, 1, &[0.25531432, 0.01867515, -0.26619542]);
+
+  for it in (0..51isize).map(|x| x as f32 / 50.0) {
+    for jt in (0..51isize).map(|x| x as f32 / 50.0) {
       print!("{}", if net.eval(na::DVector::from_slice(3, &[it, jt, 1.0]))[0] > 0.5 {'#'} else {'.'});
     }
     print!("\n");
