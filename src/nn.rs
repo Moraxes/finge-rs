@@ -1,5 +1,5 @@
+#![allow(unused_variable)]
 use ::rand;
-use ::na;
 use na::{DMatrix, DVector, Norm, IterableMut};
 
 #[derive(Clone, Debug)]
@@ -31,7 +31,6 @@ impl Network {
     };
     net.activation_coeffs.insert(0, 0.0);
     net.weights.insert(0, DMatrix::new_zeros(0, 0));
-    // net.biases.insert(0, DVector::new_zeros(0));
     net
   }
 
@@ -104,7 +103,6 @@ impl Network {
                                     DVector::from_slice(ta.len(), &ta[..]))) {
         *layers.get_mut(0).unwrap() = input.clone();
         self.feed_forward(&mut layers);
-        // println!("output: {:?}", output);
         let out_layer_diff = layers.last().unwrap().clone() - output;
         train_error += out_layer_diff.norm_squared() / out_layer_diff.len() as f32;
         let residual_errors = self.backpropagate(layers.clone(), out_layer_diff, conf);
@@ -113,33 +111,6 @@ impl Network {
         Network::add_biases(&mut bias_update_sum, bias_update);
       }
       self.update_weights(&weight_update_sum, &bias_update_sum, train_data.len(), conf);
-      // println!("delta: {:?}", weight_update_sum);
-      // println!("weights ({}): ", self.weights.len());
-      // for w in &self.weights[1..] {
-        // println!("{:?}", w)
-      // }
-      // println!("biases ({}): ", self.biases.len());
-      // for b in &self.biases[1..] {
-        // println!("{:?}", b);
-      // }
-
-
-      use std::io::Write;
-
-      // writeln!(::std::io::stderr(), "epoch {}", epoch);
-      // for (it, ref w) in self.weights.iter().enumerate() {
-      //   writeln!(::std::io::stderr(), "w_{} = {:?}", it, w);
-      // }
-
-      // let mut map = String::new();
-      // for it in (0..51isize).map(|x| x as f32 / 50.0) {
-      //   for jt in (0..51isize).map(|x| x as f32 / 50.0) {
-      //     write!(map, "{}", if self.eval(DVector::from_slice(3, &[it, jt, 1.0]))[0] > 0.5 {'#'} else {'.'});
-      //   }
-      //   write!(map, "\n");
-      // }
-
-      // ::std::io::Write::write_all(&mut ::std::io::stderr(), map.as_bytes());
 
       train_error /= train_data.len() as f32;
       let new_validation_error = validation_data.iter()
@@ -151,21 +122,7 @@ impl Network {
       } else {
         epochs_since_validation_improvement += 1;
       }
-      println!("epoch {} - train err: {}, validation err: {}, stability: {}", epoch, train_error, validation_error, epochs_since_validation_improvement);
-      // {
-      //   use ::std::fmt::Write;
-      //   let mut map = String::new();
-      //   for it in (-0..51isize).map(|x| x as f32 / 50.0) {
-      //     for jt in (-0..51isize).map(|x| x as f32 / 50.0) {
-      //       write!(map, "{}", if best_known_net.eval(na::DVector::from_slice(2, &[it, jt]))[0] > 0.5 {'#'} else {'.'});
-      //     }
-      //     write!(map, "\n");
-      //   }
-      //   println!("{:#?}", best_known_net);
-
-      //   ::std::io::Write::write_all(&mut ::std::io::stderr(), map.as_bytes());
-      //   ::std::thread::sleep_ms(10);
-      // }
+      println!("epoch {} - train err: {}, validation err: {} ({} this epoch), stability: {}", epoch, train_error, validation_error, new_validation_error, epochs_since_validation_improvement);
     }
     *self = best_known_net;
   }
@@ -208,15 +165,7 @@ impl Network {
   }
 
   fn feed_forward(&self, layers: &mut Vec<DVector<f32>>) {
-    use ::mmul;
     use na::Iterable;
-
-    // println!("==============================");
-    // println!("feed_forward begin.");
-    // println!("layers:");
-    for (it, ref layer) in layers.iter().enumerate() {
-      // println!("    #{} = {:?}", it, layer);
-    }
 
     for it in 0..(layers.len() - 1) {
       let input = layers[it].clone() * self.weights[it + 1].clone();
@@ -224,38 +173,14 @@ impl Network {
       assert_eq!(layers[it + 1].len(), self.biases[it + 1].len());
       layers[it + 1] = input.iter().zip(self.biases[it + 1].iter()).map(|(&net, &b)| Network::sigmoid(net + b, self.activation_coeffs[it + 1])).collect();
     }
-
-    // println!("feed_forward end.");
-    // println!("layers:");
-    for (it, ref layer) in layers.iter().enumerate() {
-      // println!("    #{} = {:?}", it, layer);
-    }
-    // println!("==============================");
   }
 
   fn backpropagate(&mut self, mut layers: Vec<DVector<f32>>, out_layer_diff: DVector<f32>, conf: &TrainConfig) -> Vec<DVector<f32>> {
-    use ::mmul;
-    use na::{Iterable, Transpose};
-    // NOTE(msniegocki): the initial net activation can be reused due
-    // the useful derivative propperty of the sigmoid function
-  
-    // println!("==============================");
-    // println!("backpropagate begin.");
-    // println!("diff: {:?}", out_layer_diff);
-    // println!("layers:");
-    for (it, ref layer) in layers.iter().enumerate() {
-      // println!("    #{} = {:?}", it, layer);
-    }
-
+    use na::Iterable;
     for ((layer, coeff), bias_v) in layers.iter_mut().zip(&self.activation_coeffs).zip(&self.biases) {
       for (out, b) in layer.iter_mut().zip(bias_v.iter()) {
         *out = Network::sigmoid_prime_from_sigmoid(*out + b, *coeff);
       }
-    }
-
-    // println!("layers post-diff:");
-    for (it, ref layer) in layers.iter().enumerate() {
-      // println!("    #{} = {:?}", it, layer);
     }
 
     let mut delta = self.zero_layers();
@@ -268,20 +193,8 @@ impl Network {
     for it in (0..(layers.len() - 1)).rev() {
       let next_delta: DVector<f32> = &self.weights[it + 1] * &delta[it + 1];
       assert_eq!(next_delta.len(), delta[it].len());
-      // println!("layers[{}] = {:?}", it, layers[it]);
-      // println!("next_delta = {:?}", next_delta);
       delta[it] = next_delta.iter().zip(layers[it].iter()).map(|(&d, &x)| d * x).collect();
-      // delta[it] = next_delta * layers[it].clone();
-
-      // println!("delta[{}] = {:?}", it, delta[it]);
     }
-
-    // println!("backpropagate end.");
-    // println!("delta:");
-    for (it, ref d) in delta.iter().enumerate() {
-      // println!("    #{} = {:?}", it, d);
-    }
-    // println!("==============================");
 
     delta
   }
@@ -313,39 +226,4 @@ impl Network {
   fn sigmoid_prime_from_sigmoid(sig: f32, beta: f32) -> f32 {
     beta * sig * (1.0 - sig)
   }
-
-  // pub fn write(&self, filename: &str) {
-  //   use ::{std, bc};
-  //   use std::error::Error;
-  //   use std::fs::File;
-  //   use std::io::Write;
-
-  //   let bytes = bc::serde::serialize(self, bc::SizeLimit::Infinite)
-  //     .unwrap_or_else(
-  //       |err| {
-  //         let _ = writeln!(
-  //           std::io::stderr(),
-  //           "bincode serialization error: {}\n{}",
-  //           err.description(),
-  //           err.cause().map(Error::description).unwrap_or(""));
-  //       Vec::new()
-  //     });
-    
-  //   let mut file: File = match File::create(filename) {
-  //     Err(err) =>
-  //       panic!(
-  //         "failed to create file {}: {}\n{}",
-  //         filename,
-  //         err.description(),
-  //         err.cause().map(Error::description).unwrap_or("")),
-  //     Ok(f) => f,
-  //   };
-
-  //   file.write_all(&bytes).unwrap_or_else(
-  //     |err| panic!(
-  //       "failed to write to file {}: {}\n{}",
-  //       filename,
-  //       err.description(),
-  //       err.cause().map(Error::description).unwrap_or("")));
-  // }
 }

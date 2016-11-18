@@ -13,14 +13,11 @@ mod nn;
 mod program_args;
 
 fn main() {
-  // let args = program_args::get();
   use nn::*;
   use rand::{Rng, XorShiftRng, SeedableRng};
-  use std::fmt::Write;
 
   let mut net = Network::from_definition(vec![2, 1], vec![1.0]);
 
-  // let mut rng: XorShiftRng = XorShiftRng::from_seed([12294830, 92340110, 538101039, 4420040421]);
   let mut rng: XorShiftRng = XorShiftRng::from_seed(rand::random());
   let train_data = (0..100).map(|_| {
     let a = rng.gen();
@@ -50,8 +47,6 @@ fn main() {
   }).collect::<Vec<_>>();
 
   net.assign_random_weights(&mut rng);
-  // net.weights[1] = na::DMatrix::from_column_vector(2, 1, &[0.25531432, 0.01867515]);
-  // net.biases[1] = na::DVector::from_slice(1, &[-0.26619542]);
   net.train(train_data, validation_data, &TrainConfig {
     learning_rate: 1.0,
     momentum_rate: 0.0,
