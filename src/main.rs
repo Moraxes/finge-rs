@@ -16,7 +16,7 @@ fn main() {
   use nn::*;
   use rand::{Rng, XorShiftRng, SeedableRng};
 
-  let mut net = Network::from_definition(vec![2, 1], vec![1.0]);
+  let mut net = Network::from_definition(vec![2, 1], vec![20.0], ActivationFunction::Sigmoid);
 
   let mut rng: XorShiftRng = XorShiftRng::from_seed(rand::random());
   let train_data = (0..100).map(|_| {
@@ -51,8 +51,8 @@ fn main() {
     learning_rate: 1.0,
     momentum_rate: 0.0,
     validation_ratio: 0.0,
-    sequential_validation_failures_required: 100,
-    max_epochs: Some(100),
+    sequential_validation_failures_required: 5,
+    max_epochs: Some(1000),
   });
 
   let demo_data = vec![

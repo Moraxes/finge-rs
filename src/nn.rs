@@ -1,4 +1,4 @@
-#![allow(unused_variable)]
+#![allow(unused_variables)]
 use ::rand;
 use na::{DMatrix, DVector, Norm, IterableMut};
 
@@ -8,6 +8,29 @@ pub struct Network {
   pub activation_coeffs: Vec<f32>,
   pub weights: Vec<DMatrix<f32>>,
   pub biases: Vec<DVector<f32>>,
+  pub activation_fn: ActivationFunction,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub enum ActivationFunction {
+  Sigmoid,
+  Tanh,
+}
+
+impl ActivationFunction {
+  pub fn function(&self, x: f32, coeff: f32) -> f32 {
+    match self {
+      &ActivationFunction::Sigmoid => 1.0 / (1.0 + (-x * coeff).exp()),
+      &ActivationFunction::Tanh => (x * coeff).tanh(),
+    }
+  }
+
+  pub fn derivative(&self, x: f32, coeff: f32) -> f32 {
+    match self {
+      &ActivationFunction::Sigmoid => coeff * self.function(x, coeff) * (1.0 - self.function(x, coeff)),
+      &ActivationFunction::Tanh => coeff / (x * coeff).cosh(),
+    }
+  }
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy)]
@@ -22,12 +45,13 @@ pub struct TrainConfig {
 pub type TrainData = Vec<(Vec<f32>, Vec<f32>)>;
 
 impl Network {
-  pub fn from_definition(layer_sizes: Vec<usize>, activation_coeffs: Vec<f32>) -> Network {
+  pub fn from_definition(layer_sizes: Vec<usize>, activation_coeffs: Vec<f32>, afn: ActivationFunction) -> Network {
     let mut net = Network {
       layer_sizes: layer_sizes.clone(),
       activation_coeffs: activation_coeffs,
       weights: layer_sizes.windows(2).map(|w| DMatrix::new_zeros(w[0], w[1])).collect::<Vec<_>>(),
       biases: layer_sizes.iter().map(|&s| DVector::new_zeros(s)).collect::<Vec<_>>(),
+      activation_fn: afn,
     };
     net.activation_coeffs.insert(0, 0.0);
     net.weights.insert(0, DMatrix::new_zeros(0, 0));
@@ -102,10 +126,11 @@ impl Network {
           .map(|&(ref ex, ref ta)| (DVector::from_slice(ex.len(), &ex[..]),
                                     DVector::from_slice(ta.len(), &ta[..]))) {
         *layers.get_mut(0).unwrap() = input.clone();
-        self.feed_forward(&mut layers);
+        let mut layer_inputs = self.zero_layers();
+        self.feed_forward(&mut layers, &mut layer_inputs);
         let out_layer_diff = layers.last().unwrap().clone() - output;
         train_error += out_layer_diff.norm_squared() / out_layer_diff.len() as f32;
-        let residual_errors = self.backpropagate(layers.clone(), out_layer_diff, conf);
+        let residual_errors = self.backpropagate(layer_inputs.clone(), out_layer_diff, conf);
         let (weight_update, bias_update) = self.compute_weight_update(&layers, residual_errors, conf);
         Network::add_weights(&mut weight_update_sum, weight_update);
         Network::add_biases(&mut bias_update_sum, bias_update);
@@ -123,6 +148,21 @@ impl Network {
         epochs_since_validation_improvement += 1;
       }
       println!("epoch {} - train err: {}, validation err: {} ({} this epoch), stability: {}", epoch, train_error, validation_error, new_validation_error, epochs_since_validation_improvement);
+
+      // {
+      //   use std::fmt::Write;
+
+      //   let mut map = String::new();
+      //   for it in (0..11isize).map(|x| x as f32 / 10.0) {
+      //     for jt in (0..11isize).map(|x| x as f32 / 10.0) {
+      //       write!(map, "{}", if self.eval(DVector::from_slice(2, &[it, jt]))[0] > 0.5 {'#'} else {'.'});
+      //     }
+      //     write!(map, "\n");
+      //   }
+
+      //   ::std::io::Write::write_all(&mut ::std::io::stderr(), map.as_bytes());
+      //   ::std::thread::sleep_ms(10);
+      // }
     }
     *self = best_known_net;
   }
@@ -153,7 +193,8 @@ impl Network {
 
   fn eval_impl(&self, layers: &mut Vec<DVector<f32>>, example: DVector<f32>) {
     layers[0] = example;
-    self.feed_forward(layers);
+    let mut _li = self.zero_layers();
+    self.feed_forward(layers, &mut _li);
   }
 
   pub fn eval(&self, example: DVector<f32>) -> Vec<f32> {
@@ -164,22 +205,24 @@ impl Network {
     layers.last().unwrap().iter().cloned().collect()
   }
 
-  fn feed_forward(&self, layers: &mut Vec<DVector<f32>>) {
+  fn feed_forward(&self, layers: &mut Vec<DVector<f32>>, layer_inputs: &mut Vec<DVector<f32>>) {
     use na::Iterable;
 
     for it in 0..(layers.len() - 1) {
       let input = layers[it].clone() * self.weights[it + 1].clone();
       assert_eq!(layers[it + 1].len(), input.len());
       assert_eq!(layers[it + 1].len(), self.biases[it + 1].len());
-      layers[it + 1] = input.iter().zip(self.biases[it + 1].iter()).map(|(&net, &b)| Network::sigmoid(net + b, self.activation_coeffs[it + 1])).collect();
+      layer_inputs[it + 1] = input.iter().zip(self.biases[it + 1].iter()).map(|(&net, &b)| net + b).collect(); 
+      layers[it + 1] = layer_inputs[it + 1].iter().map(|&inp| self.activation_fn.function(inp, self.activation_coeffs[it + 1])).collect();
     }
   }
 
   fn backpropagate(&mut self, mut layers: Vec<DVector<f32>>, out_layer_diff: DVector<f32>, conf: &TrainConfig) -> Vec<DVector<f32>> {
     use na::Iterable;
-    for ((layer, coeff), bias_v) in layers.iter_mut().zip(&self.activation_coeffs).zip(&self.biases) {
-      for (out, b) in layer.iter_mut().zip(bias_v.iter()) {
-        *out = Network::sigmoid_prime_from_sigmoid(*out + b, *coeff);
+
+    for (layer, coeff) in layers.iter_mut().zip(&self.activation_coeffs) {
+      for out in layer.iter_mut() {
+        *out = self.activation_fn.derivative(*out, *coeff);
       }
     }
 
@@ -213,17 +256,5 @@ impl Network {
         *b -= db / examples as f32;
       }
     }
-  }
-
-  pub fn sigmoid(t: f32, beta: f32) -> f32 {
-    1.0 / (1.0 + (-t * beta).exp())
-  }
-
-  pub fn sigmoid_prime(t: f32, beta: f32) -> f32 {
-    beta * Network::sigmoid(t, beta) * (1.0 - Network::sigmoid(t, beta))
-  }
-
-  fn sigmoid_prime_from_sigmoid(sig: f32, beta: f32) -> f32 {
-    beta * sig * (1.0 - sig)
   }
 }
