@@ -18,9 +18,10 @@ fn main() {
   use rand::{Rng, XorShiftRng, SeedableRng};
   use std::fmt::Write;
 
-  let mut net = Network::from_definition(vec![3, 1], vec![1.0, 1.0, 1.0, 1.0]);
+  let mut net = Network::from_definition(vec![2, 1], vec![1.0]);
 
-  let mut rng: XorShiftRng = XorShiftRng::from_seed([12294830, 92340110, 538101039, 4420040421]);
+  // let mut rng: XorShiftRng = XorShiftRng::from_seed([12294830, 92340110, 538101039, 4420040421]);
+  let mut rng: XorShiftRng = XorShiftRng::from_seed(rand::random());
   let train_data = (0..100).map(|_| {
     let a = rng.gen();
     let b = rng.gen();
@@ -28,7 +29,6 @@ fn main() {
       vec![
         if a { 1.0 } else { 0.0 },
         if b { 1.0 } else { 0.0 },
-        1.0,
       ],
       vec![
         if a && b { 1.0 } else { 0.0 },
@@ -42,7 +42,6 @@ fn main() {
       vec![
         if a { 1.0 } else { 0.0 },
         if b { 1.0 } else { 0.0 },
-        1.0,
       ],
       vec![
         if a && b { 1.0 } else { 0.0 },
@@ -50,23 +49,24 @@ fn main() {
     )
   }).collect::<Vec<_>>();
 
-  // net.assign_random_weights(&mut rng);
-  net.weights[1] = na::DMatrix::from_column_vector(3, 1, &[0.25531432, 0.01867515, -0.26619542]);
-  // net.train(train_data, validation_data, &TrainConfig {
-  //   learning_rate: 3.0,
-  //   momentum_rate: 0.0,
-  //   validation_ratio: 0.0,
-  //   sequential_validation_failures_required: 20,
-  //   max_epochs: Some(100),
-  // });
+  net.assign_random_weights(&mut rng);
+  // net.weights[1] = na::DMatrix::from_column_vector(2, 1, &[0.25531432, 0.01867515]);
+  // net.biases[1] = na::DVector::from_slice(1, &[-0.26619542]);
+  net.train(train_data, validation_data, &TrainConfig {
+    learning_rate: 1.0,
+    momentum_rate: 0.0,
+    validation_ratio: 0.0,
+    sequential_validation_failures_required: 100,
+    max_epochs: Some(100),
+  });
 
-  let mut map = String::new();
-  for it in (0..51isize).map(|x| x as f32 / 50.0) {
-    for jt in (0..51isize).map(|x| x as f32 / 50.0) {
-      write!(map, "{}", if net.eval(na::DVector::from_slice(3, &[it, jt, 1.0]))[0] > 0.5 {'#'} else {'.'});
-    }
-    write!(map, "\n");
+  let demo_data = vec![
+    (vec![0.0, 0.0], vec![0.0]),
+    (vec![0.0, 1.0], vec![0.0]),
+    (vec![1.0, 0.0], vec![0.0]),
+    (vec![1.0, 1.0], vec![1.0]),
+  ];
+  for (ex, ta) in demo_data {
+    println!("{:?} -> {:?} (target: {:?})", ex, net.eval(na::DVector::from_slice(2, &ex)), ta);
   }
-
-  std::io::Write::write_all(&mut std::io::stderr(), map.as_bytes());
 }
