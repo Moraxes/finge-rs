@@ -7,8 +7,9 @@ authors = ["Maciej Śniegocki <m.w.sniegocki@gmail.com>"]
 bincode = "^0.6"
 clap = "^2.15"
 matrixmultiply = "^0.1"
-nalgebra = "0.10"
+nalgebra = { path = "../nalgebra" }
 rand = "^0.3"
 serde = "^0.8"
 serde_json = "^0.8"
 serde_derive = "^0.8"
+image = "0.10.3"

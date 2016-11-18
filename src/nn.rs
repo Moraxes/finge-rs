@@ -2,7 +2,7 @@
 use ::rand;
 use na::{DMatrix, DVector, Norm, IterableMut};
 
-#[derive(Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Network {
   pub layer_sizes: Vec<usize>,
   pub activation_coeffs: Vec<f32>,
@@ -96,7 +96,7 @@ impl Network {
     }
   }
 
-  pub fn train(&mut self, train_data: TrainData, validation_data: TrainData, conf: &TrainConfig) {
+  pub fn train(&mut self, all_data: TrainData, conf: &TrainConfig) {
     let mut epochs_since_validation_improvement = 0usize;
     let mut epoch = 0usize;
     let mut layers = self.zero_layers();
@@ -105,6 +105,12 @@ impl Network {
     let mut best_known_net = self.clone();
 
     let mut validation_error = ::std::f32::INFINITY;
+
+    let (validation_data, train_data) = (
+      &all_data[..(conf.validation_ratio * all_data.len() as f32) as usize],
+      &all_data[(conf.validation_ratio * all_data.len() as f32) as usize..]
+    );
+
     while epochs_since_validation_improvement < conf.sequential_validation_failures_required && conf.max_epochs.map(|max| epoch < max).unwrap_or(true) {
       epoch += 1;
       let mut train_error = 0.0;
@@ -212,6 +218,7 @@ impl Network {
       let input = layers[it].clone() * self.weights[it + 1].clone();
       assert_eq!(layers[it + 1].len(), input.len());
       assert_eq!(layers[it + 1].len(), self.biases[it + 1].len());
+      // println!("layer_inputs is {}, biases is {}", layer_inputs.len(), self.biases.len());
       layer_inputs[it + 1] = input.iter().zip(self.biases[it + 1].iter()).map(|(&net, &b)| net + b).collect(); 
       layers[it + 1] = layer_inputs[it + 1].iter().map(|&inp| self.activation_fn.function(inp, self.activation_coeffs[it + 1])).collect();
     }
