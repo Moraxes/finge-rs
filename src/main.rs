@@ -33,8 +33,8 @@ fn train<'a>(args: &ArgMatches<'a>) {
     match File::open(args.value_of("config").unwrap()) {
       Ok(file) => sj::from_reader(file).unwrap(),
       Err(_) => TrainConfig {
-        learning_rate: 1.0,
-        momentum_rate: 0.0,
+        learning_rate: 0.1,
+        momentum_rate: None,
         validation_ratio: 0.2,
         sequential_validation_failures_required: 5,
         max_epochs: Some(1000),
@@ -71,23 +71,25 @@ fn train<'a>(args: &ArgMatches<'a>) {
   }
 
 
-  let mut net = Network::from_definition(vec![10*7, 5*7, 10], vec![2.0, 4.0], ActivationFunction::Sigmoid);
+  let mut net = if let Some(model_path) = args.value_of("model") {
+    use bc::serde as bcs;
+    use std::fs::File;
+    use std::io::BufReader;
+
+    let mut file = BufReader::new(File::open(model_path).unwrap());
+    bcs::deserialize_from(&mut file, bc::SizeLimit::Infinite).unwrap()
+  } else {
+    let defn = {
+      use std::fs::File;
+      match File::open(args.value_of("net_defn").unwrap()) {
+        Ok(file) => sj::from_reader(file).unwrap(),
+        Err(_) => panic!("no network definition found"),
+      }
+    };
+    Network::from_definition(&defn)
+  };
   let mut rng: rand::XorShiftRng = rand::XorShiftRng::from_seed(rand::random());
   rng.shuffle(&mut train_data);
-
-  // let (train, val) = Network::split_data_sequences(&mut rng, train_data, &conf);
-  // println!("train length: {}, val length: {}", train.len(), val.len());
-  // for &(ref input, ref label) in &train[..10] {
-  //   println!("{} ->", label);
-  //   for row in input.chunks(7) {
-  //     for ch in row {
-  //       print!("{}", if ch > &0.5 { '#' } else { ' ' });
-  //     }
-  //     println!();
-  //   }
-  //   println!();
-  // }
-
   net.assign_random_weights(&mut rng);
   net.train(train_data, &conf, &mut rng);
 

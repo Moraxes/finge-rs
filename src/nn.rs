@@ -11,6 +11,13 @@ pub struct Network {
   pub activation_fn: ActivationFunction,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct NetworkDefn {
+  layers: Vec<usize>,
+  activation_coeffs: Vec<f32>,
+  activation_fn: String,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 pub enum ActivationFunction {
   Sigmoid,
@@ -36,7 +43,7 @@ impl ActivationFunction {
 #[derive(Serialize, Deserialize, Clone, Copy)]
 pub struct TrainConfig {
   pub learning_rate: f32,
-  pub momentum_rate: f32,
+  pub momentum_rate: Option<f32>,
   pub validation_ratio: f32,
   pub sequential_validation_failures_required: usize,
   pub max_epochs: Option<usize>,
@@ -45,13 +52,17 @@ pub struct TrainConfig {
 pub type TrainData = Vec<(Vec<f32>, usize)>;
 
 impl Network {
-  pub fn from_definition(layer_sizes: Vec<usize>, activation_coeffs: Vec<f32>, afn: ActivationFunction) -> Network {
+  pub fn from_definition(defn: &NetworkDefn) -> Network {
     let mut net = Network {
-      layer_sizes: layer_sizes.clone(),
-      activation_coeffs: activation_coeffs,
-      weights: layer_sizes.windows(2).map(|w| DMatrix::new_zeros(w[0], w[1])).collect::<Vec<_>>(),
-      biases: layer_sizes.iter().map(|&s| DVector::new_zeros(s)).collect::<Vec<_>>(),
-      activation_fn: afn,
+      layer_sizes: defn.layers.clone(),
+      activation_coeffs: defn.activation_coeffs.clone(),
+      weights: defn.layers.windows(2).map(|w| DMatrix::new_zeros(w[0], w[1])).collect::<Vec<_>>(),
+      biases: defn.layers.iter().map(|&s| DVector::new_zeros(s)).collect::<Vec<_>>(),
+      activation_fn: match defn.activation_fn.as_str() {
+        "sigmoid" => ActivationFunction::Sigmoid,
+        "tanh" => ActivationFunction::Tanh,
+        _ => panic!("unrecognized activation function: {}", defn.activation_fn),
+      },
     };
     net.activation_coeffs.insert(0, 0.0);
     net.weights.insert(0, DMatrix::new_zeros(0, 0));
@@ -102,8 +113,6 @@ impl Network {
     let mut buckets: HashMap<usize, Vec<Vec<f32>>> = HashMap::new();
 
     for (input, label) in all_data {
-      // let label = input.iter().enumerate().find(|&(it, &x)| x == 1.0).unwrap().0;
-      println!("label (phase 1) = {}", label);
       if buckets.contains_key(&label) {
         buckets.get_mut(&label).unwrap().push(input);
       } else {
@@ -119,7 +128,6 @@ impl Network {
     let mut train_data: TrainData = Vec::new();
 
     for (label, inputs) in buckets {
-      println!("label (phase 2) = {}", label);
       let split_index = (conf.validation_ratio * inputs.len() as f32) as usize;
       for (it, entry) in inputs.into_iter().enumerate() {
         if it < split_index {
@@ -144,7 +152,9 @@ impl Network {
     let mut epoch = 0usize;
     let mut layers = self.zero_layers();
     let mut weight_update_sum = self.zero_weights();
+    let mut last_weight_update_sum = self.zero_weights();
     let mut bias_update_sum = self.zero_layers();
+    let mut last_bias_update_sum = self.zero_layers();
     let mut best_known_net = self.clone();
 
     let mut validation_error = ::std::f32::INFINITY;
@@ -154,17 +164,12 @@ impl Network {
     while epochs_since_validation_improvement < conf.sequential_validation_failures_required && conf.max_epochs.map(|max| epoch < max).unwrap_or(true) {
       epoch += 1;
       let mut train_error = 0.0;
-      for wu in &mut weight_update_sum {
-        for dw in wu.as_mut_vector() {
-          *dw = 0.0;
-        }
+      if conf.momentum_rate.is_some() {
+        last_weight_update_sum = weight_update_sum;
+        last_bias_update_sum = bias_update_sum;
       }
-
-      for bu in &mut bias_update_sum {
-        for db in bu.iter_mut() {
-          *db = 0.0;
-        }
-      }
+      weight_update_sum = self.zero_weights();
+      bias_update_sum = self.zero_layers();
 
       for (input, output) in train_data.iter()
           .map(|&(ref ex, ta)| (DVector::from_slice(ex.len(), &ex[..]),
@@ -179,7 +184,7 @@ impl Network {
         Network::add_weights(&mut weight_update_sum, weight_update);
         Network::add_biases(&mut bias_update_sum, bias_update);
       }
-      self.update_weights(&weight_update_sum, &bias_update_sum, train_data.len(), conf);
+      self.update_weights(&weight_update_sum, &bias_update_sum, &last_weight_update_sum, &last_bias_update_sum, train_data.len(), conf);
 
       train_error /= train_data.len() as f32;
       let new_validation_error = validation_data.iter()
@@ -219,8 +224,8 @@ impl Network {
 
     for it in 1..layers.len() {
       let correction = layers[it-1].outer(&delta[it]);
-      weight_update[it] = conf.learning_rate * correction;
-      bias_update[it] = conf.learning_rate * delta[it].clone();
+      weight_update[it] = correction;
+      bias_update[it] = delta[it].clone();
     }
 
     (weight_update, bias_update)
@@ -287,18 +292,32 @@ impl Network {
     delta
   }
 
-  fn update_weights(&mut self, weight_update_sum: &[DMatrix<f32>], bias_update_sum: &[DVector<f32>], examples: usize, conf: &TrainConfig) {
+  fn update_weights(&mut self, weight_update_sum: &[DMatrix<f32>], bias_update_sum: &[DVector<f32>], last_weight_update_sum: &[DMatrix<f32>], last_bias_update_sum: &[DVector<f32>], examples: usize, conf: &TrainConfig) {
     use na::Iterable;
 
     for it in 0..self.weights.len() {
       for (w, dw) in self.weights[it].as_mut_vector().iter_mut().zip(weight_update_sum[it].as_vector()) {
-        *w -= dw / examples as f32;
+        *w -= dw / examples as f32 * conf.learning_rate;
       }
     }
 
     for it in 0..self.biases.len() {
       for (b, db) in self.biases[it].iter_mut().zip(bias_update_sum[it].iter()) {
-        *b -= db / examples as f32;
+        *b -= db / examples as f32 * conf.learning_rate;
+      }
+    }
+
+    if let Some(momentum) = conf.momentum_rate {
+      for it in 0..self.weights.len() {
+        for (w, dw) in self.weights[it].as_mut_vector().iter_mut().zip(last_weight_update_sum[it].as_vector()) {
+          *w -= dw / examples as f32 * momentum;
+        }
+      }
+
+      for it in 0..self.biases.len() {
+        for (b, db) in self.biases[it].iter_mut().zip(last_bias_update_sum[it].iter()) {
+          *b -= db / examples as f32 * momentum;
+        }
       }
     }
   }
