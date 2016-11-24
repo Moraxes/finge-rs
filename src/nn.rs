@@ -42,7 +42,7 @@ pub struct TrainConfig {
   pub max_epochs: Option<usize>,
 }
 
-pub type TrainData = Vec<(Vec<f32>, Vec<f32>)>;
+pub type TrainData = Vec<(Vec<f32>, usize)>;
 
 impl Network {
   pub fn from_definition(layer_sizes: Vec<usize>, activation_coeffs: Vec<f32>, afn: ActivationFunction) -> Network {
@@ -96,7 +96,50 @@ impl Network {
     }
   }
 
-  pub fn train(&mut self, all_data: TrainData, conf: &TrainConfig) {
+  pub fn split_data_sequences<R: ::rand::Rng>(rng: &mut R, all_data: TrainData, conf: &TrainConfig) -> (TrainData, TrainData) {
+    use std::collections::HashMap;
+
+    let mut buckets: HashMap<usize, Vec<Vec<f32>>> = HashMap::new();
+
+    for (input, label) in all_data {
+      // let label = input.iter().enumerate().find(|&(it, &x)| x == 1.0).unwrap().0;
+      println!("label (phase 1) = {}", label);
+      if buckets.contains_key(&label) {
+        buckets.get_mut(&label).unwrap().push(input);
+      } else {
+        buckets.insert(label, vec![input]);
+      }
+    }
+
+    for (input, mut outputs) in &mut buckets {
+      rng.shuffle(&mut outputs);
+    }
+
+    let mut validation_data: TrainData = Vec::new();
+    let mut train_data: TrainData = Vec::new();
+
+    for (label, inputs) in buckets {
+      println!("label (phase 2) = {}", label);
+      let split_index = (conf.validation_ratio * inputs.len() as f32) as usize;
+      for (it, entry) in inputs.into_iter().enumerate() {
+        if it < split_index {
+          &mut validation_data
+        } else {
+          &mut train_data
+        // }.push((entry, (0..10).map(|x| if x == label { 1.0 } else { 0.0 }).collect::<Vec<f32>>()));
+        }.push((entry, label));
+      }
+    }
+
+    rng.shuffle(&mut validation_data);
+    rng.shuffle(&mut train_data);
+
+    (train_data, validation_data)
+  }
+
+  pub fn train<R: ::rand::Rng>(&mut self, all_data: TrainData, conf: &TrainConfig, rng: &mut R) {
+    use std::iter::FromIterator;
+
     let mut epochs_since_validation_improvement = 0usize;
     let mut epoch = 0usize;
     let mut layers = self.zero_layers();
@@ -106,10 +149,7 @@ impl Network {
 
     let mut validation_error = ::std::f32::INFINITY;
 
-    let (validation_data, train_data) = (
-      &all_data[..(conf.validation_ratio * all_data.len() as f32) as usize],
-      &all_data[(conf.validation_ratio * all_data.len() as f32) as usize..]
-    );
+    let (train_data, validation_data) = Network::split_data_sequences(rng, all_data, conf);
 
     while epochs_since_validation_improvement < conf.sequential_validation_failures_required && conf.max_epochs.map(|max| epoch < max).unwrap_or(true) {
       epoch += 1;
@@ -126,11 +166,9 @@ impl Network {
         }
       }
 
-      println!("\n\n### EPOCH {} ###", epoch);
-
       for (input, output) in train_data.iter()
-          .map(|&(ref ex, ref ta)| (DVector::from_slice(ex.len(), &ex[..]),
-                                    DVector::from_slice(ta.len(), &ta[..]))) {
+          .map(|&(ref ex, ta)| (DVector::from_slice(ex.len(), &ex[..]),
+                                DVector::from_iter((0..10).map(|x| if x == ta { 1.0 } else { 0.0 })))) {
         *layers.get_mut(0).unwrap() = input.clone();
         let mut layer_inputs = self.zero_layers();
         self.feed_forward(&mut layers, &mut layer_inputs);
@@ -145,7 +183,7 @@ impl Network {
 
       train_error /= train_data.len() as f32;
       let new_validation_error = validation_data.iter()
-        .map(|&(ref ex, ref ta)| self.validation_error_of(&mut layers, DVector::from_slice(ex.len(), &ex[..]), DVector::from_slice(ta.len(), &ta[..]))).sum::<f32>() / validation_data.len() as f32;
+        .map(|&(ref ex, ta)| self.validation_error_of(&mut layers, DVector::from_slice(ex.len(), &ex[..]), DVector::from_iter((0..10).map(|x| if x == ta { 1.0 } else { 0.0 })))).sum::<f32>() / validation_data.len() as f32;
       if new_validation_error < validation_error {
         epochs_since_validation_improvement = 0;
         best_known_net = self.clone();
@@ -153,7 +191,7 @@ impl Network {
       } else {
         epochs_since_validation_improvement += 1;
       }
-      println!("epoch {} - train err: {}, validation err: {} ({} this epoch), stability: {}", epoch, train_error, validation_error, new_validation_error, epochs_since_validation_improvement);
+      // println!("epoch {} - train err: {}, validation err: {} ({} this epoch), stability: {}", epoch, train_error, validation_error, new_validation_error, epochs_since_validation_improvement);
 
       // {
       //   use std::fmt::Write;

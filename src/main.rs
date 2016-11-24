@@ -44,19 +44,19 @@ fn train<'a>(args: &ArgMatches<'a>) {
 
   let mut train_data = Vec::new();
 
-  for maybe_entry in std::fs::read_dir("./data").unwrap() {
+  for maybe_entry in std::fs::read_dir(args.value_of("data_dir").unwrap()).unwrap() {
     let entry = maybe_entry.unwrap();
     let label = match entry.file_name().into_string().unwrap().chars().next().unwrap() {
-      '0' => vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-      '1' => vec![0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-      '2' => vec![0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-      '3' => vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-      '4' => vec![0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-      '5' => vec![0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0],
-      '6' => vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
-      '7' => vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0],
-      '8' => vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
-      '9' => vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+      '0' => 0,
+      '1' => 1,
+      '2' => 2,
+      '3' => 3,
+      '4' => 4,
+      '5' => 5,
+      '6' => 6,
+      '7' => 7,
+      '8' => 8,
+      '9' => 9,
       _ => panic!("excuse me"),
     };
     let data = {
@@ -74,8 +74,22 @@ fn train<'a>(args: &ArgMatches<'a>) {
   let mut net = Network::from_definition(vec![10*7, 5*7, 10], vec![2.0, 4.0], ActivationFunction::Sigmoid);
   let mut rng: rand::XorShiftRng = rand::XorShiftRng::from_seed(rand::random());
   rng.shuffle(&mut train_data);
+
+  // let (train, val) = Network::split_data_sequences(&mut rng, train_data, &conf);
+  // println!("train length: {}, val length: {}", train.len(), val.len());
+  // for &(ref input, ref label) in &train[..10] {
+  //   println!("{} ->", label);
+  //   for row in input.chunks(7) {
+  //     for ch in row {
+  //       print!("{}", if ch > &0.5 { '#' } else { ' ' });
+  //     }
+  //     println!();
+  //   }
+  //   println!();
+  // }
+
   net.assign_random_weights(&mut rng);
-  net.train(train_data, &conf);
+  net.train(train_data, &conf, &mut rng);
 
   {
     use bc::serde as bcs;
@@ -95,20 +109,20 @@ fn test<'a>(args: &ArgMatches<'a>) {
   let mut train_data = Vec::new();
   let mut train_names = Vec::new();
 
-  for maybe_entry in std::fs::read_dir("./data").unwrap() {
+  for maybe_entry in std::fs::read_dir(args.value_of("data_dir").unwrap()).unwrap() {
     let entry: std::fs::DirEntry = maybe_entry.unwrap();
     train_names.push(entry.file_name().into_string().unwrap());
     let label = match entry.file_name().into_string().unwrap().chars().next().unwrap() {
-      '0' => vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-      '1' => vec![0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-      '2' => vec![0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-      '3' => vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-      '4' => vec![0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-      '5' => vec![0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0],
-      '6' => vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
-      '7' => vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0],
-      '8' => vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
-      '9' => vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+      '0' => 0,
+      '1' => 1,
+      '2' => 2,
+      '3' => 3,
+      '4' => 4,
+      '5' => 5,
+      '6' => 6,
+      '7' => 7,
+      '8' => 8,
+      '9' => 9,
       _ => panic!("excuse me"),
     };
     let data = {
@@ -131,16 +145,16 @@ fn test<'a>(args: &ArgMatches<'a>) {
     bcs::deserialize_from(&mut file, bc::SizeLimit::Infinite).unwrap()
   };
 
-  let successful_predictions = train_data.iter().filter(|&&(ref example, ref label): &&(Vec<f32>, Vec<f32>)| {
+  let successful_predictions = train_data.iter().filter(|&&(ref example, label): &&(Vec<f32>, usize)| {
     let output = net.eval(na::DVector::from_slice(example.len(), &example[..]));
     let output_th: Vec<f32> = output.iter().map(|&x| if x < 0.5 { 0.0 } else { 1.0 }).collect();
-    output_th.iter().zip(label).all(|(&out, &lbl)| out == lbl)
+    output_th.iter().zip((0..10).map(|x| if x == label { 1.0 } else { 0.0 })).all(|(&out, lbl)| out == lbl)
   }).count();
 
   for (it, case) in train_data.iter().enumerate() {
     let output = net.eval(na::DVector::from_slice(case.0.len(), &case.0[..]));
     let output_th: Vec<f32> = output.iter().map(|&x| if x < 0.5 { 0.0 } else { 1.0 }).collect();
-    if !output_th.iter().zip(&case.1).all(|(&out, &lbl)| out == lbl) {
+    if !output_th.iter().zip((0..10).map(|x| if x == case.1 { 1.0 } else { 0.0 })).all(|(&out, lbl)| out == lbl) {
       println!("misprediction: {} as {:?}", train_names[it], output_th);
     }
   }
