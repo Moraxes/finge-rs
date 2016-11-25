@@ -1,4 +1,5 @@
 #![feature(proc_macro)]
+#![feature(iter_max_by)]
 
 extern crate bincode as bc;
 extern crate clap;
@@ -159,16 +160,22 @@ fn test<'a>(args: &ArgMatches<'a>) {
   };
 
   let successful_predictions = train_data.iter().filter(|&&(ref example, label): &&(Vec<f32>, usize)| {
+    use std::cmp::Ordering;
     let output = net.eval(na::DVector::from_slice(example.len(), &example[..]));
-    let output_th: Vec<f32> = output.iter().map(|&x| if x < 0.5 { 0.0 } else { 1.0 }).collect();
-    output_th.iter().zip((0..10).map(|x| if x == label { 1.0 } else { 0.0 })).all(|(&out, lbl)| out == lbl)
+    let output_lbl = output.iter().enumerate()
+      .max_by(|&(_, &x), &(_, &y)| if x < y { Ordering::Less } else if x > y { Ordering::Greater } else { Ordering::Equal }).unwrap_or((255, &0.0)).0;
+    // output_th.iter().zip((0..10).map(|x| if x == label { 1.0 } else { 0.0 })).all(|(&out, lbl)| out == lbl)
+    output_lbl == label
   }).count();
 
   for (it, case) in train_data.iter().enumerate() {
+    use std::cmp::Ordering;
     let output = net.eval(na::DVector::from_slice(case.0.len(), &case.0[..]));
-    let output_th: Vec<f32> = output.iter().map(|&x| if x < 0.5 { 0.0 } else { 1.0 }).collect();
-    if !output_th.iter().zip((0..10).map(|x| if x == case.1 { 1.0 } else { 0.0 })).all(|(&out, lbl)| out == lbl) {
-      println!("misprediction: {} as {:?}", train_names[it], output_th);
+    let output_lbl = output.iter().enumerate()
+      .max_by(|&(_, &x), &(_, &y)| if x < y { Ordering::Less } else if x > y { Ordering::Greater } else { Ordering::Equal }).unwrap_or((255, &0.0)).0;
+    // if !output_th.iter().zip((0..10).map(|x| if x == case.1 { 1.0 } else { 0.0 })).all(|(&out, lbl)| out == lbl) {
+    if output_lbl != case.1 {
+      println!("misprediction: {} as {:?}", train_names[it], output_lbl);
     }
   }
   println!("{} / {}", successful_predictions, train_data.len());
