@@ -20,6 +20,7 @@ fn main() {
   match args.subcommand_name() {
     Some("train") => train(args.subcommand_matches("train").unwrap()),
     Some("test") => test(args.subcommand_matches("test").unwrap()),
+    Some("dump-features") => dump_features(args.subcommand_matches("dump-features").unwrap()),
     _ => {},
   }
 }
@@ -57,7 +58,11 @@ fn train<'a>(args: &ArgMatches<'a>) {
       '7' => 7,
       '8' => 8,
       '9' => 9,
-      _ => panic!("excuse me"),
+      _ => {
+        use std::io::Write;
+        writeln!(std::io::stderr(), "ignoring file {}", entry.file_name().into_string().unwrap()).unwrap();
+        continue;
+      },
     };
     let data = {
       use std::fs::File;
@@ -91,7 +96,9 @@ fn train<'a>(args: &ArgMatches<'a>) {
   let mut rng: rand::XorShiftRng = rand::XorShiftRng::from_seed(rand::random());
   rng.shuffle(&mut train_data);
   net.assign_random_weights(&mut rng);
-  net.train(train_data, &conf, &mut rng);
+  for err in net.train(train_data, &conf, &mut rng) {
+    println!("{}", err);
+  }
 
   {
     use bc::serde as bcs;
@@ -125,7 +132,11 @@ fn test<'a>(args: &ArgMatches<'a>) {
       '7' => 7,
       '8' => 8,
       '9' => 9,
-      _ => panic!("excuse me"),
+      _ => {
+        use std::io::Write;
+        writeln!(std::io::stderr(), "ignoring file {}", entry.file_name().into_string().unwrap()).unwrap();
+        continue;
+      },
     };
     let data = {
       use std::fs::File;
@@ -161,4 +172,55 @@ fn test<'a>(args: &ArgMatches<'a>) {
     }
   }
   println!("{} / {}", successful_predictions, train_data.len());
+}
+
+fn dump_features<'a>(args: &ArgMatches<'a>) {
+  use std::path::PathBuf;
+  use nn::*;
+
+  let net: Network = {
+    use bc::serde as bcs;
+    use std::fs::File;
+    use std::io::BufReader;
+
+    let mut file = BufReader::new(File::open(args.value_of("model").unwrap()).unwrap());
+    bcs::deserialize_from(&mut file, bc::SizeLimit::Infinite).unwrap()
+  };
+
+  let mut base_pb = PathBuf::new();
+  base_pb.push(args.value_of("dir").unwrap());
+
+  for col_it in 0..net.weights[1].ncols() {
+    use na::{Iterable, Column};
+
+    let col: na::DVector<f32> = net.weights[1].column(col_it);
+
+    let min = col.iter().fold(std::f32::INFINITY, |acc, &x| if x < acc { x } else { acc });
+    let max = col.iter().fold(std::f32::NEG_INFINITY, |acc, &x| if x > acc { x } else { acc });
+    
+    let bytes = col.iter().map(|x| ((x - min) / (max - min) * 255.0) as u8).collect::<Vec<_>>();
+    base_pb.push(format!("feature-0-{:06}.png", col_it));
+    img::save_buffer(base_pb.to_str().unwrap(), &bytes[..], 7, 10, img::ColorType::Gray(8)).unwrap();
+    base_pb.pop();
+  }
+
+  for col_it in 0..net.weights[2].ncols() {
+    use na::{Iterable, Column};
+    use na::Shape;
+    use na::Transpose;
+
+    let col: na::DVector<f32> = net.weights[2].column(col_it);
+    println!("len: {}", col.len());
+    println!("shape: {:?}", net.weights[1].shape());
+
+    let preimage: na::DVector<f32> = col * net.weights[1].transpose();
+
+    let min = preimage.iter().fold(std::f32::INFINITY, |acc, &x| if x < acc { x } else { acc });
+    let max = preimage.iter().fold(std::f32::NEG_INFINITY, |acc, &x| if x > acc { x } else { acc });
+    
+    let bytes = preimage.iter().map(|x| ((x - min) / (max - min) * 255.0) as u8).collect::<Vec<_>>();
+    base_pb.push(format!("feature-1-{:06}.png", col_it));
+    img::save_buffer(base_pb.to_str().unwrap(), &bytes[..], 7, 10, img::ColorType::Gray(8)).unwrap();
+    base_pb.pop();
+  }
 }

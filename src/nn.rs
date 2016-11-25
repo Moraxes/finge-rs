@@ -145,7 +145,7 @@ impl Network {
     (train_data, validation_data)
   }
 
-  pub fn train<R: ::rand::Rng>(&mut self, all_data: TrainData, conf: &TrainConfig, rng: &mut R) {
+  pub fn train<R: ::rand::Rng>(&mut self, all_data: TrainData, conf: &TrainConfig, rng: &mut R) -> Vec<f32> {
     use std::iter::FromIterator;
 
     let mut epochs_since_validation_improvement = 0usize;
@@ -157,12 +157,18 @@ impl Network {
     let mut last_bias_update_sum = self.zero_layers();
     let mut best_known_net = self.clone();
 
+    let mut errlog = Vec::new();
+
     let mut validation_error = ::std::f32::INFINITY;
 
     let (train_data, validation_data) = Network::split_data_sequences(rng, all_data, conf);
 
     while epochs_since_validation_improvement < conf.sequential_validation_failures_required && conf.max_epochs.map(|max| epoch < max).unwrap_or(true) {
       epoch += 1;
+      if epoch % 10 == 0 {
+        println!("epoch {}", epoch);
+      }
+
       let mut train_error = 0.0;
       if conf.momentum_rate.is_some() {
         last_weight_update_sum = weight_update_sum;
@@ -186,9 +192,10 @@ impl Network {
       }
       self.update_weights(&weight_update_sum, &bias_update_sum, &last_weight_update_sum, &last_bias_update_sum, train_data.len(), conf);
 
-      train_error /= train_data.len() as f32;
+      errlog.push(train_error);
+
       let new_validation_error = validation_data.iter()
-        .map(|&(ref ex, ta)| self.validation_error_of(&mut layers, DVector::from_slice(ex.len(), &ex[..]), DVector::from_iter((0..10).map(|x| if x == ta { 1.0 } else { 0.0 })))).sum::<f32>() / validation_data.len() as f32;
+        .map(|&(ref ex, ta)| self.validation_error_of(&mut layers, DVector::from_slice(ex.len(), &ex[..]), DVector::from_iter((0..10).map(|x| if x == ta { 1.0 } else { 0.0 })))).sum::<f32>();
       if new_validation_error < validation_error {
         epochs_since_validation_improvement = 0;
         best_known_net = self.clone();
@@ -196,24 +203,10 @@ impl Network {
       } else {
         epochs_since_validation_improvement += 1;
       }
-      // println!("epoch {} - train err: {}, validation err: {} ({} this epoch), stability: {}", epoch, train_error, validation_error, new_validation_error, epochs_since_validation_improvement);
-
-      // {
-      //   use std::fmt::Write;
-
-      //   let mut map = String::new();
-      //   for it in (0..11isize).map(|x| x as f32 / 10.0) {
-      //     for jt in (0..11isize).map(|x| x as f32 / 10.0) {
-      //       write!(map, "{}", if self.eval(DVector::from_slice(2, &[it, jt]))[0] > 0.5 {'#'} else {'.'});
-      //     }
-      //     write!(map, "\n");
-      //   }
-
-      //   ::std::io::Write::write_all(&mut ::std::io::stderr(), map.as_bytes());
-      //   ::std::thread::sleep_ms(10);
-      // }
     }
     *self = best_known_net;
+
+    errlog
   }
 
   fn compute_weight_update(&self, layers: &[DVector<f32>], delta: Vec<DVector<f32>>, conf: &TrainConfig) -> (Vec<DMatrix<f32>>, Vec<DVector<f32>>) {

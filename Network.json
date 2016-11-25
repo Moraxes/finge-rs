@@ -1,5 +1,5 @@
 {
-  "layers": [70, 50, 30, 10],
-  "activation_coeffs": [2.0, 2.0, 2.0],
-  "activation_fn": "tanh"
+  "layers": [70, 40, 10],
+  "activation_coeffs": [2.0, 4.0],
+  "activation_fn": "sigmoid"
 }

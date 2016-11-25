@@ -1,6 +1,6 @@
 {
-  "learning_rate": 0.05,
-  "momentum_rate": 0.1,
+  "learning_rate": 0.2,
+  "momentum_rate": null,
   "validation_ratio": 0.2,
   "sequential_validation_failures_required": 100,
   "max_epochs": 1000
