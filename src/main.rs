@@ -10,9 +10,11 @@ extern crate serde;
 extern crate serde_json as sj;
 #[macro_use] extern crate serde_derive;
 extern crate image as img;
+extern crate byteorder as bo;
 
 mod nn;
 mod program_args;
+mod mnist;
 
 use clap::ArgMatches;
 
@@ -28,7 +30,7 @@ fn main() {
 
 fn train<'a>(args: &ArgMatches<'a>) {
   use nn::*;
-  use rand::{Rng, SeedableRng};
+  use rand::SeedableRng;
 
   let conf = {
     use std::fs::File;
@@ -40,42 +42,15 @@ fn train<'a>(args: &ArgMatches<'a>) {
         validation_ratio: 0.2,
         sequential_validation_failures_required: 5,
         max_epochs: Some(1000),
+        epoch_log_period: Some(10),
       },
     }
   };
 
-  let mut train_data = Vec::new();
+  let images = mnist::load_idx_images("mnist/train-images.idx3-ubyte").unwrap();
+  let labels = mnist::load_idx_labels("mnist/train-labels.idx1-ubyte").unwrap();
 
-  for maybe_entry in std::fs::read_dir(args.value_of("data_dir").unwrap()).unwrap() {
-    let entry = maybe_entry.unwrap();
-    let label = match entry.file_name().into_string().unwrap().chars().next().unwrap() {
-      '0' => 0,
-      '1' => 1,
-      '2' => 2,
-      '3' => 3,
-      '4' => 4,
-      '5' => 5,
-      '6' => 6,
-      '7' => 7,
-      '8' => 8,
-      '9' => 9,
-      _ => {
-        use std::io::Write;
-        writeln!(std::io::stderr(), "ignoring file {}", entry.file_name().into_string().unwrap()).unwrap();
-        continue;
-      },
-    };
-    let data = {
-      use std::fs::File;
-      use std::io::BufReader;
-
-      let file = BufReader::new(File::open(entry.path()).unwrap());
-      let pngdata: img::DynamicImage = img::load(file, img::ImageFormat::PNG).unwrap();
-      pngdata.to_luma().pixels().map(|&p| 1.0 - p.data[0] as f32 / 255.0).collect()
-    };
-    train_data.push((data, label));
-  }
-
+  let train_data: Vec<(Vec<f32>, usize)> = images.into_iter().zip(labels).collect();
 
   let mut net = if let Some(model_path) = args.value_of("model") {
     use bc::serde as bcs;
@@ -95,7 +70,6 @@ fn train<'a>(args: &ArgMatches<'a>) {
     Network::from_definition(&defn)
   };
   let mut rng: rand::XorShiftRng = rand::XorShiftRng::from_seed(rand::random());
-  rng.shuffle(&mut train_data);
   net.assign_random_weights(&mut rng);
   for err in net.train(train_data, &conf, &mut rng) {
     println!("{}", err);
@@ -116,39 +90,10 @@ fn train<'a>(args: &ArgMatches<'a>) {
 fn test<'a>(args: &ArgMatches<'a>) {
   use nn::*;
 
-  let mut train_data = Vec::new();
-  let mut train_names = Vec::new();
+  let images = mnist::load_idx_images("mnist/train-images.idx3-ubyte").unwrap();
+  let labels = mnist::load_idx_labels("mnist/train-labels.idx1-ubyte").unwrap();
 
-  for maybe_entry in std::fs::read_dir(args.value_of("data_dir").unwrap()).unwrap() {
-    let entry: std::fs::DirEntry = maybe_entry.unwrap();
-    train_names.push(entry.file_name().into_string().unwrap());
-    let label = match entry.file_name().into_string().unwrap().chars().next().unwrap() {
-      '0' => 0,
-      '1' => 1,
-      '2' => 2,
-      '3' => 3,
-      '4' => 4,
-      '5' => 5,
-      '6' => 6,
-      '7' => 7,
-      '8' => 8,
-      '9' => 9,
-      _ => {
-        use std::io::Write;
-        writeln!(std::io::stderr(), "ignoring file {}", entry.file_name().into_string().unwrap()).unwrap();
-        continue;
-      },
-    };
-    let data = {
-      use std::fs::File;
-      use std::io::BufReader;
-
-      let file = BufReader::new(File::open(entry.path()).unwrap());
-      let pngdata: img::DynamicImage = img::load(file, img::ImageFormat::PNG).unwrap();
-      pngdata.to_luma().pixels().map(|&p| 1.0 - p.data[0] as f32 / 255.0).collect()
-    };
-    train_data.push((data, label));
-  }
+  let test_data: Vec<(Vec<f32>, usize)> = images.into_iter().zip(labels).collect();
 
   let net: Network = {
     use bc::serde as bcs;
@@ -159,26 +104,25 @@ fn test<'a>(args: &ArgMatches<'a>) {
     bcs::deserialize_from(&mut file, bc::SizeLimit::Infinite).unwrap()
   };
 
-  let successful_predictions = train_data.iter().filter(|&&(ref example, label): &&(Vec<f32>, usize)| {
+  let successful_predictions = test_data.iter().filter(|&&(ref example, label): &&(Vec<f32>, usize)| {
     use std::cmp::Ordering;
     let output = net.eval(na::DVector::from_slice(example.len(), &example[..]));
     let output_lbl = output.iter().enumerate()
       .max_by(|&(_, &x), &(_, &y)| if x < y { Ordering::Less } else if x > y { Ordering::Greater } else { Ordering::Equal }).unwrap_or((255, &0.0)).0;
-    // output_th.iter().zip((0..10).map(|x| if x == label { 1.0 } else { 0.0 })).all(|(&out, lbl)| out == lbl)
     output_lbl == label
   }).count();
 
-  for (it, case) in train_data.iter().enumerate() {
+  for (it, case) in test_data.iter().enumerate() {
     use std::cmp::Ordering;
     let output = net.eval(na::DVector::from_slice(case.0.len(), &case.0[..]));
     let output_lbl = output.iter().enumerate()
       .max_by(|&(_, &x), &(_, &y)| if x < y { Ordering::Less } else if x > y { Ordering::Greater } else { Ordering::Equal }).unwrap_or((255, &0.0)).0;
-    // if !output_th.iter().zip((0..10).map(|x| if x == case.1 { 1.0 } else { 0.0 })).all(|(&out, lbl)| out == lbl) {
     if output_lbl != case.1 {
-      println!("misprediction: {} as {:?}", train_names[it], output_lbl);
+      println!("misprediction: item {} as {:?}", it, output_lbl);
     }
   }
-  println!("{} / {}", successful_predictions, train_data.len());
+  let percentage = successful_predictions as f32 / test_data.len() as f32 * 100.0;
+  println!("{} / {} ({:.*})", successful_predictions, test_data.len(), 2, percentage);
 }
 
 fn dump_features<'a>(args: &ArgMatches<'a>) {
@@ -207,7 +151,7 @@ fn dump_features<'a>(args: &ArgMatches<'a>) {
     
     let bytes = col.iter().map(|x| ((x - min) / (max - min) * 255.0) as u8).collect::<Vec<_>>();
     base_pb.push(format!("feature-0-{:06}.png", col_it));
-    img::save_buffer(base_pb.to_str().unwrap(), &bytes[..], 7, 10, img::ColorType::Gray(8)).unwrap();
+    img::save_buffer(base_pb.to_str().unwrap(), &bytes[..], 28, 28, img::ColorType::Gray(8)).unwrap();
     base_pb.pop();
   }
 
@@ -227,7 +171,7 @@ fn dump_features<'a>(args: &ArgMatches<'a>) {
     
     let bytes = preimage.iter().map(|x| ((x - min) / (max - min) * 255.0) as u8).collect::<Vec<_>>();
     base_pb.push(format!("feature-1-{:06}.png", col_it));
-    img::save_buffer(base_pb.to_str().unwrap(), &bytes[..], 7, 10, img::ColorType::Gray(8)).unwrap();
+    img::save_buffer(base_pb.to_str().unwrap(), &bytes[..], 28, 28, img::ColorType::Gray(8)).unwrap();
     base_pb.pop();
   }
 }

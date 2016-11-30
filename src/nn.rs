@@ -47,6 +47,7 @@ pub struct TrainConfig {
   pub validation_ratio: f32,
   pub sequential_validation_failures_required: usize,
   pub max_epochs: Option<usize>,
+  pub epoch_log_period: Option<usize>,
 }
 
 pub type TrainData = Vec<(Vec<f32>, usize)>;
@@ -165,7 +166,7 @@ impl Network {
 
     while epochs_since_validation_improvement < conf.sequential_validation_failures_required && conf.max_epochs.map(|max| epoch < max).unwrap_or(true) {
       epoch += 1;
-      if epoch % 10 == 0 {
+      if epoch % conf.epoch_log_period.unwrap_or(10) == 0 {
         println!("epoch {}", epoch);
       }
 

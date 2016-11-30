@@ -3,5 +3,6 @@
   "momentum_rate": null,
   "validation_ratio": 0.2,
   "sequential_validation_failures_required": 100,
-  "max_epochs": 1000
+  "max_epochs": 1000,
+  "epoch_log_period": 1
 }
