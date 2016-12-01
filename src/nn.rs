@@ -97,16 +97,18 @@ impl Network {
     weights
   }
 
-  fn add_weights(delta1: &mut Vec<DMatrix<f32>>, delta2: Vec<DMatrix<f32>>) {
+  fn weight_sum(mut delta1: Vec<DMatrix<f32>>, delta2: Vec<DMatrix<f32>>) -> Vec<DMatrix<f32>> {
     for (dw1, dw2) in delta1.iter_mut().zip(delta2.iter().cloned()) {
       *dw1 += dw2;
     }
+    delta1
   }
 
-  fn add_biases(bias1: &mut Vec<DVector<f32>>, bias2: Vec<DVector<f32>>) {
+  fn bias_sum(mut bias1: Vec<DVector<f32>>, bias2: Vec<DVector<f32>>) -> Vec<DVector<f32>> {
     for (dw1, dw2) in bias1.iter_mut().zip(bias2.iter().cloned()) {
       *dw1 += dw2;
     }
+    bias1
   }
 
   pub fn split_data_sequences<R: ::rand::Rng>(rng: &mut R, all_data: TrainData, conf: &TrainConfig) -> (TrainData, TrainData) {
@@ -153,10 +155,7 @@ impl Network {
 
     let mut epochs_since_validation_improvement = 0usize;
     let mut epoch = 0usize;
-    let mut layers = self.zero_layers();
-    let mut weight_update_sum = self.zero_weights();
     let mut last_weight_update_sum = self.zero_weights();
-    let mut bias_update_sum = self.zero_layers();
     let mut last_bias_update_sum = self.zero_layers();
     let mut best_known_net = self.clone();
 
@@ -171,37 +170,36 @@ impl Network {
       if epoch % conf.epoch_log_period.unwrap_or(10) == 0 {
         println!("epoch {}", epoch);
       }
-
-      let mut train_error = 0.0;
-      if conf.momentum_rate.is_some() {
-        last_weight_update_sum = weight_update_sum;
-        last_bias_update_sum = bias_update_sum;
-      }
-      weight_update_sum = self.zero_weights();
-      bias_update_sum = self.zero_layers();
-
       let batch_indices = ::rand::sample(rng, 0..train_data.len(), (conf.batch_size.unwrap_or(1.0) * train_data.len() as f64) as usize);
 
-      for (input, output) in batch_indices.iter()
-          .map(|&idx| &train_data[idx])
-          .map(|&(ref ex, ta)| (DVector::from_slice(ex.len(), &ex[..]),
-                                DVector::from_iter((0..10).map(|x| if x == ta { 1.0 } else { 0.0 })))) {
-        *layers.get_mut(0).unwrap() = input.clone();
-        let mut layer_inputs = self.zero_layers();
-        self.feed_forward(&mut layers, &mut layer_inputs);
-        let out_layer_diff = layers.last().unwrap().clone() - output;
-        train_error += out_layer_diff.norm_squared() / out_layer_diff.len() as f32;
-        let residual_errors = self.backpropagate(layer_inputs.clone(), out_layer_diff, conf);
-        let (weight_update, bias_update) = self.compute_weight_update(&layers, residual_errors, conf);
-        Network::add_weights(&mut weight_update_sum, weight_update);
-        Network::add_biases(&mut bias_update_sum, bias_update);
-      }
+      let (weight_update_sum, bias_update_sum, train_error) = batch_indices.par_iter()
+        .map(|&idx| &train_data[idx])
+        .map(|&(ref ex, ta)| (DVector::from_slice(ex.len(), &ex[..]),
+                              DVector::from_iter((0..10).map(|x| if x == ta { 1.0 } else { 0.0 }))))
+        .map(|(input, output)| {
+          let mut layers = self.zero_layers();
+          *layers.get_mut(0).unwrap() = input.clone();
+          let mut layer_inputs = self.zero_layers();
+          self.feed_forward(&mut layers, &mut layer_inputs);
+          let out_layer_diff = layers.last().unwrap().clone() - output;
+          let train_error = out_layer_diff.norm_squared() / out_layer_diff.len() as f32;
+          let residual_errors = self.backpropagate(layer_inputs.clone(), out_layer_diff, conf);
+          let updates = self.compute_weight_update(&layers, residual_errors, conf);
+          (updates.0, updates.1, train_error)
+        })
+        .reduce(|| (self.zero_weights(), self.zero_layers(), 0.0),
+          |(a_w, a_b, a_err), (b_w, b_b, b_err)| (Network::weight_sum(a_w, b_w), Network::bias_sum(a_b, b_b), a_err + b_err));
       self.update_weights(&weight_update_sum, &bias_update_sum, &last_weight_update_sum, &last_bias_update_sum, train_data.len(), conf);
 
       errlog.push(train_error);
 
-      let new_validation_error = validation_data.iter()
-        .map(|&(ref ex, ta)| self.validation_error_of(&mut layers, DVector::from_slice(ex.len(), &ex[..]), DVector::from_iter((0..10).map(|x| if x == ta { 1.0 } else { 0.0 })))).sum::<f32>();
+      let new_validation_error = validation_data.par_iter()
+        .map(|&(ref ex, ta)| {
+          let mut layers = self.zero_layers();
+          self.validation_error_of(&mut layers, DVector::from_slice(ex.len(), &ex[..]), DVector::from_iter((0..10).map(|x| if x == ta { 1.0 } else { 0.0 })))
+        })
+        .sum();
+
       if new_validation_error < validation_error {
         epochs_since_validation_improvement = 0;
         best_known_net = self.clone();
@@ -209,6 +207,12 @@ impl Network {
       } else {
         epochs_since_validation_improvement += 1;
       }
+
+      if conf.momentum_rate.is_some() {
+        last_weight_update_sum = weight_update_sum;
+        last_bias_update_sum = bias_update_sum;
+      }
+
     }
     *self = best_known_net;
 
@@ -266,7 +270,7 @@ impl Network {
     }
   }
 
-  fn backpropagate(&mut self, mut layers: Vec<DVector<f32>>, out_layer_diff: DVector<f32>, conf: &TrainConfig) -> Vec<DVector<f32>> {
+  fn backpropagate(&self, mut layers: Vec<DVector<f32>>, out_layer_diff: DVector<f32>, conf: &TrainConfig) -> Vec<DVector<f32>> {
     use na::Iterable;
 
     for (layer, coeff) in layers.iter_mut().zip(&self.activation_coeffs) {
