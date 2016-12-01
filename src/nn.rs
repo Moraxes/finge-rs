@@ -48,6 +48,7 @@ pub struct TrainConfig {
   pub sequential_validation_failures_required: usize,
   pub max_epochs: Option<usize>,
   pub epoch_log_period: Option<usize>,
+  pub batch_size: Option<f64>,
 }
 
 pub type TrainData = Vec<(Vec<f32>, usize)>;
@@ -148,6 +149,7 @@ impl Network {
 
   pub fn train<R: ::rand::Rng>(&mut self, all_data: TrainData, conf: &TrainConfig, rng: &mut R) -> Vec<f32> {
     use std::iter::FromIterator;
+    use rayon::prelude::*;
 
     let mut epochs_since_validation_improvement = 0usize;
     let mut epoch = 0usize;
@@ -178,7 +180,10 @@ impl Network {
       weight_update_sum = self.zero_weights();
       bias_update_sum = self.zero_layers();
 
-      for (input, output) in train_data.iter()
+      let batch_indices = ::rand::sample(rng, 0..train_data.len(), (conf.batch_size.unwrap_or(1.0) * train_data.len() as f64) as usize);
+
+      for (input, output) in batch_indices.iter()
+          .map(|&idx| &train_data[idx])
           .map(|&(ref ex, ta)| (DVector::from_slice(ex.len(), &ex[..]),
                                 DVector::from_iter((0..10).map(|x| if x == ta { 1.0 } else { 0.0 })))) {
         *layers.get_mut(0).unwrap() = input.clone();

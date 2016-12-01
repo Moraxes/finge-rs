@@ -11,6 +11,7 @@ extern crate serde_json as sj;
 #[macro_use] extern crate serde_derive;
 extern crate image as img;
 extern crate byteorder as bo;
+extern crate rayon;
 
 mod nn;
 mod program_args;
@@ -43,6 +44,7 @@ fn train<'a>(args: &ArgMatches<'a>) {
         sequential_validation_failures_required: 5,
         max_epochs: Some(1000),
         epoch_log_period: Some(10),
+        batch_size: Some(1.0),
       },
     }
   };
