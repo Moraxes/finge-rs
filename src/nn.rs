@@ -170,7 +170,8 @@ impl Network {
       if epoch % conf.epoch_log_period.unwrap_or(10) == 0 {
         println!("epoch {}", epoch);
       }
-      let batch_indices = ::rand::sample(rng, 0..train_data.len(), (conf.batch_size.unwrap_or(1.0) * train_data.len() as f64) as usize);
+      let batch_size = (conf.batch_size.unwrap_or(1.0) * train_data.len() as f64) as usize;
+      let batch_indices = ::rand::sample(rng, 0..train_data.len(), batch_size);
 
       let (weight_update_sum, bias_update_sum, train_error) = batch_indices.par_iter()
         .map(|&idx| &train_data[idx])
@@ -189,7 +190,7 @@ impl Network {
         })
         .reduce(|| (self.zero_weights(), self.zero_layers(), 0.0),
           |(a_w, a_b, a_err), (b_w, b_b, b_err)| (Network::weight_sum(a_w, b_w), Network::bias_sum(a_b, b_b), a_err + b_err));
-      self.update_weights(&weight_update_sum, &bias_update_sum, &last_weight_update_sum, &last_bias_update_sum, train_data.len(), conf);
+      self.update_weights(&weight_update_sum, &bias_update_sum, &last_weight_update_sum, &last_bias_update_sum, batch_size, conf);
 
       errlog.push(train_error);
 

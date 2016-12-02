@@ -9,9 +9,12 @@ clap = "^2.15"
 matrixmultiply = "^0.1"
 nalgebra = { path = "../nalgebra" }
 rand = "^0.3"
-serde = "^0.8"
+serde = "^0.8.19"
 serde_json = "^0.8"
-serde_derive = "^0.8"
+serde_derive = "^0.8.19"
 image = "0.10.3"
 byteorder = "0.5"
 rayon = "0.5"
+
+[profile.release]
+debug = true
