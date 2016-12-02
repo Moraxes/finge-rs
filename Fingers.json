@@ -2,7 +2,7 @@
   "learning_rate": 0.2,
   "momentum_rate": null,
   "validation_ratio": 0.2,
-  "sequential_validation_failures_required": 100,
+  "sequential_validation_failures_required": 5,
   "max_epochs": 1000,
   "epoch_log_period": 1,
   "batch_size": 0.01

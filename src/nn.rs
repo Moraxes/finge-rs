@@ -167,9 +167,6 @@ impl Network {
 
     while epochs_since_validation_improvement < conf.sequential_validation_failures_required && conf.max_epochs.map(|max| epoch < max).unwrap_or(true) {
       epoch += 1;
-      if epoch % conf.epoch_log_period.unwrap_or(10) == 0 {
-        println!("epoch {}", epoch);
-      }
       let batch_size = (conf.batch_size.unwrap_or(1.0) * train_data.len() as f64) as usize;
       let batch_indices = ::rand::sample(rng, 0..train_data.len(), batch_size);
 
@@ -207,6 +204,10 @@ impl Network {
         validation_error = new_validation_error;
       } else {
         epochs_since_validation_improvement += 1;
+      }
+
+      if epoch % conf.epoch_log_period.unwrap_or(10) == 0 {
+        println!("#{} - train err: {}, val err: {} (last best: {}, stability: {})", epoch, train_error, new_validation_error, validation_error, epochs_since_validation_improvement);
       }
 
       if conf.momentum_rate.is_some() {
