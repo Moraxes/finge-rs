@@ -263,9 +263,13 @@ impl Network {
     use na::Iterable;
 
     for it in 0..(layers.len() - 1) {
-      let input = layers[it].clone() * self.weights[it + 1].clone();
-      assert_eq!(layers[it + 1].len(), input.len());
-      assert_eq!(layers[it + 1].len(), self.biases[it + 1].len());
+      let input = {
+        let mut clone = layers[it].clone();
+        clone *= &self.weights[it + 1];
+        clone
+      };
+      debug_assert_eq!(layers[it + 1].len(), input.len());
+      debug_assert_eq!(layers[it + 1].len(), self.biases[it + 1].len());
       // println!("layer_inputs is {}, biases is {}", layer_inputs.len(), self.biases.len());
       layer_inputs[it + 1] = input.iter().zip(self.biases[it + 1].iter()).map(|(&net, &b)| net + b).collect(); 
       layers[it + 1] = layer_inputs[it + 1].iter().map(|&inp| self.activation_fn.function(inp, self.activation_coeffs[it + 1])).collect();
