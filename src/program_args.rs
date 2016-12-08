@@ -34,7 +34,7 @@ pub fn get<'a>() -> ArgMatches<'a> {
         .takes_value(true)
         .default_value("./data/")
         .help("path to directory with training data"))
-      .help("train a model"))
+      .about("train a model"))
     .subcommand(SubCommand::with_name("test")
       .arg(Arg::with_name("model")
         .long("model")

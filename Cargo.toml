@@ -15,6 +15,7 @@ serde_derive = "^0.8.19"
 image = "0.10.3"
 byteorder = "0.5"
 rayon = "0.5"
+ctrlc = "2"
 
 [profile.release]
 debug = true

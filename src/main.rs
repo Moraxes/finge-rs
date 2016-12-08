@@ -1,5 +1,5 @@
 #![feature(proc_macro)]
-#![feature(iter_max_by)]
+#![allow(dead_code)]
 
 extern crate bincode as bc;
 extern crate clap;
@@ -12,10 +12,14 @@ extern crate serde_json as sj;
 extern crate image as img;
 extern crate byteorder as bo;
 extern crate rayon;
+extern crate ctrlc;
 
 mod nn;
 mod program_args;
 mod mnist;
+
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use clap::ArgMatches;
 
@@ -23,7 +27,7 @@ fn main() {
   let args: clap::ArgMatches = program_args::get();
   match args.subcommand_name() {
     Some("train") => train(args.subcommand_matches("train").unwrap()),
-    Some("test") => test(args.subcommand_matches("test").unwrap()),
+    // Some("test") => test(args.subcommand_matches("test").unwrap()),
     Some("dump-features") => dump_features(args.subcommand_matches("dump-features").unwrap()),
     _ => {},
   }
@@ -32,6 +36,12 @@ fn main() {
 fn train<'a>(args: &ArgMatches<'a>) {
   use nn::*;
   use rand::SeedableRng;
+
+  let learning = Arc::new(AtomicBool::new(true));
+  let l = learning.clone();
+  ctrlc::set_handler(move || {
+    l.store(false, Ordering::SeqCst);
+  });
 
   let conf = {
     use std::fs::File;
@@ -49,10 +59,7 @@ fn train<'a>(args: &ArgMatches<'a>) {
     }
   };
 
-  let images = mnist::load_idx_images("mnist/train-images.idx3-ubyte").unwrap();
-  let labels = mnist::load_idx_labels("mnist/train-labels.idx1-ubyte").unwrap();
-
-  let train_data: Vec<(Vec<f32>, usize)> = images.into_iter().zip(labels).collect();
+  let train_data = mnist::load_idx_images("mnist/train-images.idx3-ubyte").unwrap();
 
   let mut net = if let Some(model_path) = args.value_of("model") {
     use bc::serde as bcs;
@@ -73,9 +80,7 @@ fn train<'a>(args: &ArgMatches<'a>) {
   };
   let mut rng: rand::XorShiftRng = rand::XorShiftRng::from_seed(rand::random());
   net.assign_random_weights(&mut rng);
-  for err in net.train(train_data, &conf, &mut rng) {
-    println!("{}", err);
-  }
+  net.train(train_data, &conf, &mut rng, learning);
 
   {
     use bc::serde as bcs;
@@ -89,43 +94,43 @@ fn train<'a>(args: &ArgMatches<'a>) {
   }
 }
 
-fn test<'a>(args: &ArgMatches<'a>) {
-  use nn::*;
+// fn test<'a>(args: &ArgMatches<'a>) {
+//   use nn::*;
 
-  let images = mnist::load_idx_images("mnist/train-images.idx3-ubyte").unwrap();
-  let labels = mnist::load_idx_labels("mnist/train-labels.idx1-ubyte").unwrap();
+//   let images = mnist::load_idx_images("mnist/train-images.idx3-ubyte").unwrap();
+//   let labels = mnist::load_idx_labels("mnist/train-labels.idx1-ubyte").unwrap();
 
-  let test_data: Vec<(Vec<f32>, usize)> = images.into_iter().zip(labels).collect();
+//   let test_data: Vec<(Vec<f32>, usize)> = images.into_iter().zip(labels).collect();
 
-  let net: Network = {
-    use bc::serde as bcs;
-    use std::fs::File;
-    use std::io::BufReader;
+//   let net: Network = {
+//     use bc::serde as bcs;
+//     use std::fs::File;
+//     use std::io::BufReader;
 
-    let mut file = BufReader::new(File::open(args.value_of("model").unwrap()).unwrap());
-    bcs::deserialize_from(&mut file, bc::SizeLimit::Infinite).unwrap()
-  };
+//     let mut file = BufReader::new(File::open(args.value_of("model").unwrap()).unwrap());
+//     bcs::deserialize_from(&mut file, bc::SizeLimit::Infinite).unwrap()
+//   };
 
-  let successful_predictions = test_data.iter().filter(|&&(ref example, label): &&(Vec<f32>, usize)| {
-    use std::cmp::Ordering;
-    let output = net.eval(na::DVector::from_slice(example.len(), &example[..]));
-    let output_lbl = output.iter().enumerate()
-      .max_by(|&(_, &x), &(_, &y)| if x < y { Ordering::Less } else if x > y { Ordering::Greater } else { Ordering::Equal }).unwrap_or((255, &0.0)).0;
-    output_lbl == label
-  }).count();
+//   let successful_predictions = test_data.iter().filter(|&&(ref example, label): &&(Vec<f32>, usize)| {
+//     use std::cmp::Ordering;
+//     let output = net.eval(na::DVector::from_slice(example.len(), &example[..]));
+//     let output_lbl = output.iter().enumerate()
+//       .max_by(|&(_, &x), &(_, &y)| if x < y { Ordering::Less } else if x > y { Ordering::Greater } else { Ordering::Equal }).unwrap_or((255, &0.0)).0;
+//     output_lbl == label
+//   }).count();
 
-  for (it, case) in test_data.iter().enumerate() {
-    use std::cmp::Ordering;
-    let output = net.eval(na::DVector::from_slice(case.0.len(), &case.0[..]));
-    let output_lbl = output.iter().enumerate()
-      .max_by(|&(_, &x), &(_, &y)| if x < y { Ordering::Less } else if x > y { Ordering::Greater } else { Ordering::Equal }).unwrap_or((255, &0.0)).0;
-    if output_lbl != case.1 {
-      println!("misprediction: item {} as {:?}", it, output_lbl);
-    }
-  }
-  let percentage = successful_predictions as f32 / test_data.len() as f32 * 100.0;
-  println!("{} / {} ({:.*})", successful_predictions, test_data.len(), 2, percentage);
-}
+//   for (it, case) in test_data.iter().enumerate() {
+//     use std::cmp::Ordering;
+//     let output = net.eval(na::DVector::from_slice(case.0.len(), &case.0[..]));
+//     let output_lbl = output.iter().enumerate()
+//       .max_by(|&(_, &x), &(_, &y)| if x < y { Ordering::Less } else if x > y { Ordering::Greater } else { Ordering::Equal }).unwrap_or((255, &0.0)).0;
+//     if output_lbl != case.1 {
+//       println!("misprediction: item {} as {:?}", it, output_lbl);
+//     }
+//   }
+//   let percentage = successful_predictions as f32 / test_data.len() as f32 * 100.0;
+//   println!("{} / {} ({:.*})", successful_predictions, test_data.len(), 2, percentage);
+// }
 
 fn dump_features<'a>(args: &ArgMatches<'a>) {
   use std::path::PathBuf;
@@ -148,31 +153,8 @@ fn dump_features<'a>(args: &ArgMatches<'a>) {
 
     let col: na::DVector<f32> = net.weights[1].column(col_it);
 
-    let min = col.iter().fold(std::f32::INFINITY, |acc, &x| if x < acc { x } else { acc });
-    let max = col.iter().fold(std::f32::NEG_INFINITY, |acc, &x| if x > acc { x } else { acc });
-    
-    let bytes = col.iter().map(|x| ((x - min) / (max - min) * 255.0) as u8).collect::<Vec<_>>();
-    base_pb.push(format!("feature-0-{:06}.png", col_it));
-    img::save_buffer(base_pb.to_str().unwrap(), &bytes[..], 28, 28, img::ColorType::Gray(8)).unwrap();
-    base_pb.pop();
-  }
-
-  for col_it in 0..net.weights[2].ncols() {
-    use na::{Iterable, Column};
-    use na::Shape;
-    use na::Transpose;
-
-    let col: na::DVector<f32> = net.weights[2].column(col_it);
-    println!("len: {}", col.len());
-    println!("shape: {:?}", net.weights[1].shape());
-
-    let preimage: na::DVector<f32> = col * net.weights[1].transpose();
-
-    let min = preimage.iter().fold(std::f32::INFINITY, |acc, &x| if x < acc { x } else { acc });
-    let max = preimage.iter().fold(std::f32::NEG_INFINITY, |acc, &x| if x > acc { x } else { acc });
-    
-    let bytes = preimage.iter().map(|x| ((x - min) / (max - min) * 255.0) as u8).collect::<Vec<_>>();
-    base_pb.push(format!("feature-1-{:06}.png", col_it));
+    let bytes = col.iter().map(|&x| (ActivationFunction::function(&ActivationFunction::Sigmoid, x, 2.0) * 255.0) as u8).collect::<Vec<_>>();
+    base_pb.push(format!("feature-0-{:04}.png", col_it));
     img::save_buffer(base_pb.to_str().unwrap(), &bytes[..], 28, 28, img::ColorType::Gray(8)).unwrap();
     base_pb.pop();
   }

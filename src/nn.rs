@@ -1,5 +1,6 @@
 #![allow(unused_variables)]
-use ::rand;
+
+use ::*;
 use na::{DMatrix, DVector, Norm, IterableMut};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -51,7 +52,7 @@ pub struct TrainConfig {
   pub batch_size: Option<f64>,
 }
 
-pub type TrainData = Vec<(Vec<f32>, usize)>;
+pub type TrainData = Vec<Vec<f32>>;
 
 impl Network {
   pub fn from_definition(defn: &NetworkDefn) -> Network {
@@ -112,45 +113,26 @@ impl Network {
   }
 
   pub fn split_data_sequences<R: ::rand::Rng>(rng: &mut R, all_data: TrainData, conf: &TrainConfig) -> (TrainData, TrainData) {
-    use std::collections::HashMap;
+    use ::rand::sample;
 
-    let mut buckets: HashMap<usize, Vec<Vec<f32>>> = HashMap::new();
+    let amt = (conf.validation_ratio * all_data.len() as f32) as usize;
+    let validation_idx = sample(rng, 0..all_data.len(), amt);
 
-    for (input, label) in all_data {
-      if buckets.contains_key(&label) {
-        buckets.get_mut(&label).unwrap().push(input);
+    let mut train_data = Vec::with_capacity(all_data.len() - amt);
+    let mut val_data = Vec::with_capacity(amt);
+
+    for (it, ex) in all_data.into_iter().enumerate() {
+      if validation_idx.contains(&it) {
+        &mut val_data
       } else {
-        buckets.insert(label, vec![input]);
-      }
+        &mut train_data
+      }.push(ex);
     }
 
-    for (input, mut outputs) in &mut buckets {
-      rng.shuffle(&mut outputs);
-    }
-
-    let mut validation_data: TrainData = Vec::new();
-    let mut train_data: TrainData = Vec::new();
-
-    for (label, inputs) in buckets {
-      let split_index = (conf.validation_ratio * inputs.len() as f32) as usize;
-      for (it, entry) in inputs.into_iter().enumerate() {
-        if it < split_index {
-          &mut validation_data
-        } else {
-          &mut train_data
-        // }.push((entry, (0..10).map(|x| if x == label { 1.0 } else { 0.0 }).collect::<Vec<f32>>()));
-        }.push((entry, label));
-      }
-    }
-
-    rng.shuffle(&mut validation_data);
-    rng.shuffle(&mut train_data);
-
-    (train_data, validation_data)
+    (train_data, val_data)
   }
 
-  pub fn train<R: ::rand::Rng>(&mut self, all_data: TrainData, conf: &TrainConfig, rng: &mut R) -> Vec<f32> {
-    use std::iter::FromIterator;
+  pub fn train<R: ::rand::Rng>(&mut self, all_data: TrainData, conf: &TrainConfig, rng: &mut R, learning: Arc<AtomicBool>) {
     use rayon::prelude::*;
 
     let mut epochs_since_validation_improvement = 0usize;
@@ -159,27 +141,26 @@ impl Network {
     let mut last_bias_update_sum = self.zero_layers();
     let mut best_known_net = self.clone();
 
-    let mut errlog = Vec::new();
-
     let mut validation_error = ::std::f32::INFINITY;
 
     let (train_data, validation_data) = Network::split_data_sequences(rng, all_data, conf);
+    let batch_size = (conf.batch_size.unwrap_or(1.0) * train_data.len() as f64) as usize;
 
-    while epochs_since_validation_improvement < conf.sequential_validation_failures_required && conf.max_epochs.map(|max| epoch < max).unwrap_or(true) {
+    while learning.load(Ordering::SeqCst) &&
+        epochs_since_validation_improvement < conf.sequential_validation_failures_required &&
+        conf.max_epochs.map(|max| epoch < max).unwrap_or(true) {
       epoch += 1;
-      let batch_size = (conf.batch_size.unwrap_or(1.0) * train_data.len() as f64) as usize;
       let batch_indices = ::rand::sample(rng, 0..train_data.len(), batch_size);
 
-      let (weight_update_sum, bias_update_sum, train_error) = batch_indices.par_iter()
+      let (weight_update_sum, bias_update_sum, mut train_error) = batch_indices.par_iter()
         .map(|&idx| &train_data[idx])
-        .map(|&(ref ex, ta)| (DVector::from_slice(ex.len(), &ex[..]),
-                              DVector::from_iter((0..10).map(|x| if x == ta { 1.0 } else { 0.0 }))))
-        .map(|(input, output)| {
+        .map(|ref ex| DVector::from_slice(ex.len(), &ex[..]))
+        .map(|input| {
           let mut layers = self.zero_layers();
           *layers.get_mut(0).unwrap() = input.clone();
           let mut layer_inputs = self.zero_layers();
           self.feed_forward(&mut layers, &mut layer_inputs);
-          let out_layer_diff = layers.last().unwrap().clone() - output;
+          let out_layer_diff = layers.last().unwrap().clone() - input;
           let train_error = out_layer_diff.norm_squared() / out_layer_diff.len() as f32;
           let residual_errors = self.backpropagate(layer_inputs.clone(), out_layer_diff, conf);
           let updates = self.compute_weight_update(&layers, residual_errors, conf);
@@ -187,16 +168,18 @@ impl Network {
         })
         .reduce(|| (self.zero_weights(), self.zero_layers(), 0.0),
           |(a_w, a_b, a_err), (b_w, b_b, b_err)| (Network::weight_sum(a_w, b_w), Network::bias_sum(a_b, b_b), a_err + b_err));
+
+      train_error /= batch_indices.len() as f32;
+
       self.update_weights(&weight_update_sum, &bias_update_sum, &last_weight_update_sum, &last_bias_update_sum, batch_size, conf);
 
-      errlog.push(train_error);
-
       let new_validation_error = validation_data.par_iter()
-        .map(|&(ref ex, ta)| {
+        .map(|ref ex| {
           let mut layers = self.zero_layers();
-          self.validation_error_of(&mut layers, DVector::from_slice(ex.len(), &ex[..]), DVector::from_iter((0..10).map(|x| if x == ta { 1.0 } else { 0.0 })))
+          self.validation_error_of(&mut layers, DVector::from_slice(ex.len(), &ex[..]))
         })
-        .sum();
+        .sum()
+        / validation_data.len() as f32;
 
       if new_validation_error < validation_error {
         epochs_since_validation_improvement = 0;
@@ -217,8 +200,6 @@ impl Network {
 
     }
     *self = best_known_net;
-
-    errlog
   }
 
   fn compute_weight_update(&self, layers: &[DVector<f32>], delta: Vec<DVector<f32>>, conf: &TrainConfig) -> (Vec<DMatrix<f32>>, Vec<DVector<f32>>) {
@@ -236,13 +217,12 @@ impl Network {
     (weight_update, bias_update)
   }
 
-  fn validation_error_of(&self, layers: &mut Vec<DVector<f32>>, example: DVector<f32>, target: DVector<f32>) -> f32 {
-    assert_eq!(layers[0].len(), example.len());
-    assert_eq!(layers.last().unwrap().len(), target.len());
+  fn validation_error_of(&self, layers: &mut Vec<DVector<f32>>, example: DVector<f32>) -> f32 {
+    debug_assert_eq!(layers[0].len(), example.len());
 
-    self.eval_impl(layers, example);
+    self.eval_impl(layers, example.clone());
     
-    (target - layers.last().unwrap().clone()).norm_squared() / layers.last().unwrap().len() as f32
+    (example - layers.last().unwrap().clone()).norm_squared() / layers.last().unwrap().len() as f32
   }
 
   fn eval_impl(&self, layers: &mut Vec<DVector<f32>>, example: DVector<f32>) {
