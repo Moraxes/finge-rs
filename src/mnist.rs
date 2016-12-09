@@ -22,7 +22,7 @@ pub fn load_idx_images(path: &str) -> io::Result<Vec<Vec<f32>>> {
   for _ in 0..number_of_items {
     let mut item = Vec::with_capacity(number_of_rows * number_of_cols);
     for _ in 0..(number_of_rows * number_of_cols) {
-      item.push(1.0 - cur.read_u8()? as f32 / 255.0);
+      item.push(cur.read_u8()? as f32 / 255.0);
     }
     result.push(item);
   }

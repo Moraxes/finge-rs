@@ -54,12 +54,12 @@ fn train<'a>(args: &ArgMatches<'a>) {
   let mut train_data = mnist::load_idx_images_halved("mnist/train-images.idx3-ubyte").unwrap();
 
   // normalize input data
-  for ex in &mut train_data {
-    let denom = ex.iter().map(|x| x*x).sum::<f32>().sqrt();
-    for x in ex.iter_mut() {
-      *x /= denom;
-    }
-  }
+  // for ex in &mut train_data {
+  //   let denom = ex.iter().map(|x| x*x).sum::<f32>().sqrt();
+  //   for x in ex.iter_mut() {
+  //     *x /= denom;
+  //   }
+  // }
 
   let mut rng: rand::XorShiftRng = rand::XorShiftRng::from_seed(rand::random());
   let mut net = if let Some(model_path) = args.value_of("model") {

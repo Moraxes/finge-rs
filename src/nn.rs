@@ -136,13 +136,13 @@ impl Network {
     (train_data, val_data)
   }
 
-  fn cost(&mut self, output_error: f32, avg_activations: &[f32], conf: &TrainConfig) -> f32 {
+  fn cost(&mut self, output_error: f32, avg_activations: &[f32], examples: usize, conf: &TrainConfig) -> f32 {
     let rho = conf.sparsity_param.unwrap_or(1.0);
     let beta = conf.sparsity_weight.unwrap_or(0.0);
     
     output_error +
-    beta * avg_activations.iter().map(|rho_j| rho * (rho / rho_j).ln() + (1.0 - rho) * ((1.0 - rho) / (1.0 - rho_j)).ln()).sum::<f32>() +
-    conf.regularization_param * self.weights.iter().map(|mat| mat.as_vector().iter().map(|w| w*w).sum::<f32>()).sum::<f32>()
+    if conf.sparsity_weight.is_some() { beta * avg_activations.iter().map(|rho_j| rho * (rho / rho_j).ln() + (1.0 - rho) * ((1.0 - rho) / (1.0 - rho_j)).ln()).sum::<f32>() } else { 0.0 } +
+    conf.regularization_param * self.weights.iter().map(|mat| mat.as_vector().iter().map(|w| w*w).sum::<f32>() / examples as f32).sum::<f32>() / self.weights.len() as f32
   }
 
   pub fn train<R: ::rand::Rng>(&mut self, all_data: TrainData, conf: &TrainConfig, rng: &mut R, learning: Arc<AtomicBool>) {
@@ -203,7 +203,7 @@ impl Network {
 
       self.update_weights(&weight_update_sum, &bias_update_sum, &last_weight_update_sum, &last_bias_update_sum, batch_size, conf);
 
-      let train_cost = self.cost(train_error, &average_activations[..], conf);
+      let train_cost = self.cost(train_error, &average_activations[..], batch_indices.len(), conf);
 
       let average_activations_val = if conf.sparsity_weight.is_some() {
         validation_data.par_iter()
@@ -229,7 +229,7 @@ impl Network {
         })
         .sum()
         / validation_data.len() as f32;
-      let new_validation_cost = self.cost(validation_error, &average_activations_val[..], conf);
+      let new_validation_cost = self.cost(validation_error, &average_activations_val[..], validation_data.len(), conf);
 
       if new_validation_cost < validation_cost {
         epochs_since_validation_improvement = 0;
