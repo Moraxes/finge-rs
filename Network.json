@@ -1,5 +1,5 @@
 {
-  "layers": [196, 100, 196],
+  "layers": [196, 50, 196],
   "activation_coeffs": [1.0, 1.0],
   "activation_fn": "sigmoid"
 }

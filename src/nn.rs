@@ -139,10 +139,11 @@ impl Network {
   fn cost(&mut self, output_error: f32, avg_activations: &[f32], examples: usize, conf: &TrainConfig) -> f32 {
     let rho = conf.sparsity_param.unwrap_or(1.0);
     let beta = conf.sparsity_weight.unwrap_or(0.0);
-    
+    let lambda = conf.regularization_param;
+
     output_error +
     if conf.sparsity_weight.is_some() { beta * avg_activations.iter().map(|rho_j| rho * (rho / rho_j).ln() + (1.0 - rho) * ((1.0 - rho) / (1.0 - rho_j)).ln()).sum::<f32>() } else { 0.0 } +
-    conf.regularization_param * self.weights.iter().map(|mat| mat.as_vector().iter().map(|w| w*w).sum::<f32>() / examples as f32).sum::<f32>() / self.weights.len() as f32
+    if lambda != 0.0 { conf.regularization_param * self.weights.iter().map(|mat| mat.as_vector().iter().map(|w| w*w).sum::<f32>() / examples as f32).sum::<f32>() / self.weights.len() as f32 } else { 0.0 }
   }
 
   pub fn train<R: ::rand::Rng>(&mut self, all_data: TrainData, conf: &TrainConfig, rng: &mut R, learning: Arc<AtomicBool>) {
