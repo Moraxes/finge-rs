@@ -47,20 +47,21 @@ fn train<'a>(args: &ArgMatches<'a>) {
     use std::fs::File;
     match File::open(args.value_of("config").unwrap()) {
       Ok(file) => sj::from_reader(file).unwrap(),
-      Err(_) => TrainConfig {
-        learning_rate: 0.1,
-        momentum_rate: None,
-        validation_ratio: 0.2,
-        sequential_validation_failures_required: 5,
-        max_epochs: Some(1000),
-        epoch_log_period: Some(10),
-        batch_size: Some(1.0),
-      },
+      Err(_) => panic!("no config file"),
     }
   };
 
-  let train_data = mnist::load_idx_images("mnist/train-images.idx3-ubyte").unwrap();
+  let mut train_data = mnist::load_idx_images_halved("mnist/train-images.idx3-ubyte").unwrap();
 
+  // normalize input data
+  for ex in &mut train_data {
+    let denom = ex.iter().map(|x| x*x).sum::<f32>().sqrt();
+    for x in ex.iter_mut() {
+      *x /= denom;
+    }
+  }
+
+  let mut rng: rand::XorShiftRng = rand::XorShiftRng::from_seed(rand::random());
   let mut net = if let Some(model_path) = args.value_of("model") {
     use bc::serde as bcs;
     use std::fs::File;
@@ -76,10 +77,10 @@ fn train<'a>(args: &ArgMatches<'a>) {
         Err(_) => panic!("no network definition found"),
       }
     };
-    Network::from_definition(&defn)
+    let mut net = Network::from_definition(&defn);
+    net.assign_random_weights(&mut rng);
+    net
   };
-  let mut rng: rand::XorShiftRng = rand::XorShiftRng::from_seed(rand::random());
-  net.assign_random_weights(&mut rng);
   net.train(train_data, &conf, &mut rng, learning);
 
   {
@@ -150,12 +151,15 @@ fn dump_features<'a>(args: &ArgMatches<'a>) {
 
   for col_it in 0..net.weights[1].ncols() {
     use na::{Iterable, Column};
-
     let col: na::DVector<f32> = net.weights[1].column(col_it);
+    let denom = col.iter().map(|x| x*x).sum::<f32>().sqrt();
 
-    let bytes = col.iter().map(|&x| (ActivationFunction::function(&ActivationFunction::Sigmoid, x, 2.0) * 255.0) as u8).collect::<Vec<_>>();
+    let min = col.iter().map(|x| x / denom).fold(std::f32::INFINITY, |acc, x| if x < acc { x } else { acc });
+    let max = col.iter().map(|x| x / denom).fold(std::f32::NEG_INFINITY, |acc, x| if x > acc { x } else { acc });
+
+    let bytes = col.iter().map(|x| (((x / denom - min) / (max - min)).powf(args.value_of("gamma").unwrap().parse().unwrap()) * 255.0) as u8).collect::<Vec<_>>();
     base_pb.push(format!("feature-0-{:04}.png", col_it));
-    img::save_buffer(base_pb.to_str().unwrap(), &bytes[..], 28, 28, img::ColorType::Gray(8)).unwrap();
+    img::save_buffer(base_pb.to_str().unwrap(), &bytes[..], 14, 14, img::ColorType::Gray(8)).unwrap();
     base_pb.pop();
   }
 }

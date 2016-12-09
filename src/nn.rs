@@ -50,6 +50,10 @@ pub struct TrainConfig {
   pub max_epochs: Option<usize>,
   pub epoch_log_period: Option<usize>,
   pub batch_size: Option<f64>,
+  pub sparsity_param: Option<f32>,
+  pub sparsity_weight: Option<f32>,
+  pub regularization_param: f32,
+  pub rayon_weight: f64,
 }
 
 pub type TrainData = Vec<Vec<f32>>;
@@ -132,6 +136,15 @@ impl Network {
     (train_data, val_data)
   }
 
+  fn cost(&mut self, output_error: f32, avg_activations: &[f32], conf: &TrainConfig) -> f32 {
+    let rho = conf.sparsity_param.unwrap_or(1.0);
+    let beta = conf.sparsity_weight.unwrap_or(0.0);
+    
+    output_error +
+    beta * avg_activations.iter().map(|rho_j| rho * (rho / rho_j).ln() + (1.0 - rho) * ((1.0 - rho) / (1.0 - rho_j)).ln()).sum::<f32>() +
+    conf.regularization_param * self.weights.iter().map(|mat| mat.as_vector().iter().map(|w| w*w).sum::<f32>()).sum::<f32>()
+  }
+
   pub fn train<R: ::rand::Rng>(&mut self, all_data: TrainData, conf: &TrainConfig, rng: &mut R, learning: Arc<AtomicBool>) {
     use rayon::prelude::*;
 
@@ -141,7 +154,7 @@ impl Network {
     let mut last_bias_update_sum = self.zero_layers();
     let mut best_known_net = self.clone();
 
-    let mut validation_error = ::std::f32::INFINITY;
+    let mut validation_cost = ::std::f32::INFINITY;
 
     let (train_data, validation_data) = Network::split_data_sequences(rng, all_data, conf);
     let batch_size = (conf.batch_size.unwrap_or(1.0) * train_data.len() as f64) as usize;
@@ -152,7 +165,24 @@ impl Network {
       epoch += 1;
       let batch_indices = ::rand::sample(rng, 0..train_data.len(), batch_size);
 
+      let average_activations = if conf.sparsity_weight.is_some() {
+        train_data.par_iter()
+          .map(|ref ex| DVector::from_slice(ex.len(), &ex[..]))
+          .map(|mut input| {
+            input *= &self.weights[1];
+            for x in input.iter_mut() {
+              *x = self.activation_fn.function(*x, self.activation_coeffs[1]);
+            }
+            input
+        })
+        .reduce(|| DVector::new_zeros(self.layer_sizes[1]), |a, b| a + b)
+        / train_data.len() as f32
+      } else {
+        DVector::new_zeros(self.layer_sizes[1])
+      };
+
       let (weight_update_sum, bias_update_sum, mut train_error) = batch_indices.par_iter()
+        .weight(conf.rayon_weight)
         .map(|&idx| &train_data[idx])
         .map(|ref ex| DVector::from_slice(ex.len(), &ex[..]))
         .map(|input| {
@@ -162,7 +192,7 @@ impl Network {
           self.feed_forward(&mut layers, &mut layer_inputs);
           let out_layer_diff = layers.last().unwrap().clone() - input;
           let train_error = out_layer_diff.norm_squared() / out_layer_diff.len() as f32;
-          let residual_errors = self.backpropagate(layer_inputs.clone(), out_layer_diff, conf);
+          let residual_errors = self.backpropagate(layer_inputs.clone(), out_layer_diff, &average_activations, conf);
           let updates = self.compute_weight_update(&layers, residual_errors, conf);
           (updates.0, updates.1, train_error)
         })
@@ -173,31 +203,50 @@ impl Network {
 
       self.update_weights(&weight_update_sum, &bias_update_sum, &last_weight_update_sum, &last_bias_update_sum, batch_size, conf);
 
-      let new_validation_error = validation_data.par_iter()
+      let train_cost = self.cost(train_error, &average_activations[..], conf);
+
+      let average_activations_val = if conf.sparsity_weight.is_some() {
+        validation_data.par_iter()
+          .map(|ref ex| DVector::from_slice(ex.len(), &ex[..]))
+          .map(|mut input| {
+            input *= &self.weights[1];
+            for x in input.iter_mut() {
+              *x = self.activation_fn.function(*x, self.activation_coeffs[1]);
+            }
+            input
+        })
+        .reduce(|| DVector::new_zeros(self.layer_sizes[1]), |a, b| a + b)
+        / validation_data.len() as f32
+      } else {
+        DVector::new_zeros(self.layer_sizes[1])
+      };
+
+      let validation_error = validation_data.par_iter()
+        .weight(conf.rayon_weight)
         .map(|ref ex| {
           let mut layers = self.zero_layers();
           self.validation_error_of(&mut layers, DVector::from_slice(ex.len(), &ex[..]))
         })
         .sum()
         / validation_data.len() as f32;
+      let new_validation_cost = self.cost(validation_error, &average_activations_val[..], conf);
 
-      if new_validation_error < validation_error {
+      if new_validation_cost < validation_cost {
         epochs_since_validation_improvement = 0;
         best_known_net = self.clone();
-        validation_error = new_validation_error;
+        validation_cost = new_validation_cost;
       } else {
         epochs_since_validation_improvement += 1;
       }
 
       if epoch % conf.epoch_log_period.unwrap_or(10) == 0 {
-        println!("#{} - train err: {}, val err: {} (last best: {}, stability: {})", epoch, train_error, new_validation_error, validation_error, epochs_since_validation_improvement);
+        println!("#{} - train err: {}, val err: {} (last best: {}, stability: {})", epoch, train_cost, new_validation_cost, validation_cost, epochs_since_validation_improvement);
       }
 
       if conf.momentum_rate.is_some() {
         last_weight_update_sum = weight_update_sum;
         last_bias_update_sum = bias_update_sum;
       }
-
     }
     *self = best_known_net;
   }
@@ -256,7 +305,7 @@ impl Network {
     }
   }
 
-  fn backpropagate(&self, mut layers: Vec<DVector<f32>>, out_layer_diff: DVector<f32>, conf: &TrainConfig) -> Vec<DVector<f32>> {
+  fn backpropagate(&self, mut layers: Vec<DVector<f32>>, out_layer_diff: DVector<f32>, avg_activations: &DVector<f32>, conf: &TrainConfig) -> Vec<DVector<f32>> {
     use na::Iterable;
 
     for (layer, coeff) in layers.iter_mut().zip(&self.activation_coeffs) {
@@ -264,6 +313,9 @@ impl Network {
         *out = self.activation_fn.derivative(*out, *coeff);
       }
     }
+
+    let beta = conf.sparsity_weight.unwrap_or(0.0);
+    let rho = conf.sparsity_param.unwrap_or(1.0);
 
     let mut delta = self.zero_layers();
 
@@ -274,8 +326,13 @@ impl Network {
       .collect();
     for it in (0..(layers.len() - 1)).rev() {
       let next_delta: DVector<f32> = &self.weights[it + 1] * &delta[it + 1];
-      assert_eq!(next_delta.len(), delta[it].len());
-      delta[it] = next_delta.iter().zip(layers[it].iter()).map(|(&d, &x)| d * x).collect();
+      debug_assert_eq!(next_delta.len(), delta[it].len());
+
+      if it == 1 && beta != 0.0 {
+        delta[it] = next_delta.iter().zip(avg_activations.iter()).map(|(&x, rho_i)| x + beta * (- rho / *rho_i + (1.0 - rho) / (1.0 - rho_i))).zip(layers[it].iter()).map(|(d, &x)| d * x).collect();
+      } else {
+        delta[it] = next_delta.iter().zip(layers[it].iter()).map(|(&d, x)| d * *x).collect();
+      }
     }
 
     delta
@@ -286,6 +343,7 @@ impl Network {
 
     for it in 0..self.weights.len() {
       for (w, dw) in self.weights[it].as_mut_vector().iter_mut().zip(weight_update_sum[it].as_vector()) {
+        *w *= 1.0 - conf.regularization_param * conf.learning_rate / examples as f32;
         *w -= dw / examples as f32 * conf.learning_rate;
       }
     }
