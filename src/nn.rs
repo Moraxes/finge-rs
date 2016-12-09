@@ -136,15 +136,6 @@ impl Network {
     (train_data, val_data)
   }
 
-  fn cost(&mut self, output_error: f32, avg_activations: &[f32], conf: &TrainConfig) -> f32 {
-    let rho = conf.sparsity_param.unwrap_or(1.0);
-    let beta = conf.sparsity_weight.unwrap_or(0.0);
-    
-    output_error +
-    beta * avg_activations.iter().map(|rho_j| rho * (rho / rho_j).ln() + (1.0 - rho) * ((1.0 - rho) / (1.0 - rho_j)).ln()).sum::<f32>() +
-    conf.regularization_param * self.weights.iter().map(|mat| mat.as_vector().iter().map(|w| w*w).sum::<f32>()).sum::<f32>()
-  }
-
   pub fn train<R: ::rand::Rng>(&mut self, all_data: TrainData, conf: &TrainConfig, rng: &mut R, learning: Arc<AtomicBool>) {
     use rayon::prelude::*;
 
@@ -154,7 +145,7 @@ impl Network {
     let mut last_bias_update_sum = self.zero_layers();
     let mut best_known_net = self.clone();
 
-    let mut validation_cost = ::std::f32::INFINITY;
+    let mut validation_error = ::std::f32::INFINITY;
 
     let (train_data, validation_data) = Network::split_data_sequences(rng, all_data, conf);
     let batch_size = (conf.batch_size.unwrap_or(1.0) * train_data.len() as f64) as usize;
@@ -203,25 +194,7 @@ impl Network {
 
       self.update_weights(&weight_update_sum, &bias_update_sum, &last_weight_update_sum, &last_bias_update_sum, batch_size, conf);
 
-      let train_cost = self.cost(train_error, &average_activations[..], conf);
-
-      let average_activations_val = if conf.sparsity_weight.is_some() {
-        validation_data.par_iter()
-          .map(|ref ex| DVector::from_slice(ex.len(), &ex[..]))
-          .map(|mut input| {
-            input *= &self.weights[1];
-            for x in input.iter_mut() {
-              *x = self.activation_fn.function(*x, self.activation_coeffs[1]);
-            }
-            input
-        })
-        .reduce(|| DVector::new_zeros(self.layer_sizes[1]), |a, b| a + b)
-        / validation_data.len() as f32
-      } else {
-        DVector::new_zeros(self.layer_sizes[1])
-      };
-
-      let validation_error = validation_data.par_iter()
+      let new_validation_error = validation_data.par_iter()
         .weight(conf.rayon_weight)
         .map(|ref ex| {
           let mut layers = self.zero_layers();
@@ -229,18 +202,17 @@ impl Network {
         })
         .sum()
         / validation_data.len() as f32;
-      let new_validation_cost = self.cost(validation_error, &average_activations_val[..], conf);
 
-      if new_validation_cost < validation_cost {
+      if new_validation_error < validation_error {
         epochs_since_validation_improvement = 0;
         best_known_net = self.clone();
-        validation_cost = new_validation_cost;
+        validation_error = new_validation_error;
       } else {
         epochs_since_validation_improvement += 1;
       }
 
       if epoch % conf.epoch_log_period.unwrap_or(10) == 0 {
-        println!("#{} - train err: {}, val err: {} (last best: {}, stability: {})", epoch, train_cost, new_validation_cost, validation_cost, epochs_since_validation_improvement);
+        println!("#{} - train err: {}, val err: {} (last best: {}, stability: {})", epoch, train_error, new_validation_error, validation_error, epochs_since_validation_improvement);
       }
 
       if conf.momentum_rate.is_some() {
