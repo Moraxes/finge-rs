@@ -157,7 +157,7 @@ fn dump_features<'a>(args: &ArgMatches<'a>) {
     let min = col.iter().map(|x| x / denom).fold(std::f32::INFINITY, |acc, x| if x < acc { x } else { acc });
     let max = col.iter().map(|x| x / denom).fold(std::f32::NEG_INFINITY, |acc, x| if x > acc { x } else { acc });
 
-    let bytes = col.iter().map(|x| (((x / denom - min) / (max - min)).powf(args.value_of("gamma").unwrap().parse().unwrap()) * 255.0) as u8).collect::<Vec<_>>();
+    let bytes = col.iter().map(|x| ((x / denom - min) / (max - min)).powf(args.value_of("gamma").unwrap().parse().unwrap()) * 255.0).map(|x| x as u8).collect::<Vec<_>>();
     base_pb.push(format!("feature-0-{:04}.png", col_it));
     img::save_buffer(base_pb.to_str().unwrap(), &bytes[..], 14, 14, img::ColorType::Gray(8)).unwrap();
     base_pb.pop();

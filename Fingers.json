@@ -6,8 +6,8 @@
   "max_epochs": 100000,
   "epoch_log_period": 1,
   "batch_size": 0.01,
-  "sparsity_param": 0.05,
+  "sparsity_param": 0.01,
   "sparsity_weight": 5,
-  "regularization_param": 2,
+  "regularization_param": 0,
   "rayon_weight": 100000
 }
