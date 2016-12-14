@@ -29,6 +29,7 @@ fn main() {
     Some("train") => train(args.subcommand_matches("train").unwrap()),
     // Some("test") => test(args.subcommand_matches("test").unwrap()),
     Some("dump-features") => dump_features(args.subcommand_matches("dump-features").unwrap()),
+    Some("sample") => sample(args.subcommand_matches("sample").unwrap()),
     _ => {},
   }
 }
@@ -160,6 +161,40 @@ fn dump_features<'a>(args: &ArgMatches<'a>) {
     let bytes = col.iter().map(|x| ((x / denom - min) / (max - min)).powf(args.value_of("gamma").unwrap().parse().unwrap()) * 255.0).map(|x| x as u8).collect::<Vec<_>>();
     base_pb.push(format!("feature-0-{:04}.png", col_it));
     img::save_buffer(base_pb.to_str().unwrap(), &bytes[..], 14, 14, img::ColorType::Gray(8)).unwrap();
+    base_pb.pop();
+  }
+}
+
+fn sample<'a>(args: &ArgMatches<'a>) {
+  use std::path::PathBuf;
+  use nn::*;
+  use rand::{sample, SeedableRng};
+
+  let net: Network = {
+    use bc::serde as bcs;
+    use std::fs::File;
+    use std::io::BufReader;
+
+    let mut file = BufReader::new(File::open(args.value_of("model").unwrap()).unwrap());
+    bcs::deserialize_from(&mut file, bc::SizeLimit::Infinite).unwrap()
+  };
+
+  let mut base_pb = PathBuf::new();
+  base_pb.push(args.value_of("dir").unwrap());
+
+  let mut rng: rand::XorShiftRng = rand::XorShiftRng::from_seed(rand::random());
+  let train_data = sample(&mut rng, mnist::load_idx_images_halved("mnist/train-images.idx3-ubyte").unwrap(), args.value_of("amount").unwrap().parse().unwrap());
+
+  for (it, ex) in train_data.into_iter().enumerate() {
+    let bytes_ex = ex.iter().map(|x| (x * 255.0) as u8).collect::<Vec<_>>();
+    base_pb.push(format!("{:04}-in.png", it));
+    img::save_buffer(base_pb.to_str().unwrap(), &bytes_ex[..], 14, 14, img::ColorType::Gray(8)).unwrap();
+    base_pb.pop();
+
+    let out = net.eval(na::DVector::from_slice(ex.len(), &ex[..]));
+    let bytes_enc = out.iter().map(|x| (x * 255.0) as u8).collect::<Vec<_>>();
+    base_pb.push(format!("{:04}-out.png", it));
+    img::save_buffer(base_pb.to_str().unwrap(), &bytes_enc[..], 14, 14, img::ColorType::Gray(8)).unwrap();
     base_pb.pop();
   }
 }
