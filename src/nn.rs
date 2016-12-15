@@ -344,7 +344,9 @@ impl Network {
 
     for it in 0..self.weights.len() {
       for (w, dw) in self.weights[it].as_mut_vector().iter_mut().zip(weight_update_sum[it].as_vector()) {
-        *w *= 1.0 - conf.regularization_param * conf.learning_rate / examples as f32;
+        if it == 1 {
+          *w *= 1.0 - conf.regularization_param * conf.learning_rate / examples as f32;
+        }
         *w -= dw / examples as f32 * conf.learning_rate;
       }
     }
