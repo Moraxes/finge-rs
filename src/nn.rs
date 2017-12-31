@@ -1,6 +1,8 @@
 #![allow(unused_variables)]
 
-use ::*;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
 use na::{DMatrix, DVector, Norm, IterableMut};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -77,7 +79,7 @@ impl Network {
     net
   }
 
-  pub fn assign_random_weights<R: rand::Rng>(&mut self, rng: &mut R) {
+  pub fn assign_random_weights<R: ::rand::Rng>(&mut self, rng: &mut R) {
     use rand::distributions::{Normal, IndependentSample};
 
     let dist = Normal::new(0.0, 0.1);

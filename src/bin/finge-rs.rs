@@ -13,15 +13,14 @@ extern crate byteorder as bo;
 extern crate rayon;
 extern crate ctrlc;
 
-mod nn;
-mod program_args;
-mod mnist;
+extern crate fingers;  // self
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use clap::ArgMatches;
 
+use fingers::*;
 
 fn main() {
   let args: clap::ArgMatches = program_args::get();

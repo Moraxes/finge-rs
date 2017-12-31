@@ -1,5 +1,5 @@
 [package]
-name = "finge-rs"
+name = "fingers"
 version = "0.1.0"
 authors = ["Maciej Śniegocki <m.w.sniegocki@gmail.com>"]
 
