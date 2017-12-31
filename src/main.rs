@@ -41,6 +41,7 @@ fn train<'a>(args: &ArgMatches<'a>) {
   let learning = Arc::new(AtomicBool::new(true));
   let l = learning.clone();
   ctrlc::set_handler(move || {
+    println!("Stopping...");
     l.store(false, Ordering::SeqCst);
   }).unwrap();
 
@@ -52,7 +53,7 @@ fn train<'a>(args: &ArgMatches<'a>) {
     }
   };
 
-  let train_data = mnist::load_idx_images_halved("mnist/train-images.idx3-ubyte").unwrap();
+  let all_data = mnist::load_idx_images_halved("mnist/train-images.idx3-ubyte").unwrap();
 
   // normalize input data
   // for ex in &mut train_data {
@@ -81,7 +82,12 @@ fn train<'a>(args: &ArgMatches<'a>) {
     net.assign_random_weights(&mut rng);
     net
   };
-  net.train(train_data, &conf, &mut rng, learning);
+  let (train_data, validation_data) = Network::split_data_sequences_autoencoder(&mut rng, all_data, &conf);
+  // let ref_mut_rng = &mut rng;
+  net.train_autoencoder(|| {
+    let idx = ::rand::seq::sample_indices(&mut rng, train_data.len(), (conf.batch_size.unwrap_or(0.01) as f32 * train_data.len() as f32) as usize);
+    Some(idx.iter().map(|&it| train_data[it].clone()).collect())
+  }, validation_data, &conf, learning);
 
   {
     use std::fs::File;

@@ -2,12 +2,9 @@
   "learning_rate": 0.1,
   "momentum_rate": null,
   "validation_ratio": 0.1,
-  "sequential_validation_failures_required": 15,
-  "max_epochs": 100000,
+  "sequential_validation_failures_required": 5,
+  "max_epochs": 2000,
   "epoch_log_period": 1,
   "batch_size": 0.01,
-  "sparsity_param": 0.15,
-  "sparsity_weight": 0.8,
-  "regularization_param": 0.05,
-  "rayon_weight": 100000
+  "regularization_param": 0.05
 }

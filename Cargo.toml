@@ -16,6 +16,3 @@ image = "0.18"
 byteorder = "1"
 rayon = "0.9"
 ctrlc = "3"
-
-[profile.release]
-debug = true
