@@ -4,15 +4,18 @@ version = "0.1.0"
 authors = ["Maciej Śniegocki <m.w.sniegocki@gmail.com>"]
 
 [dependencies]
-bincode = "^0.6"
-clap = "^2.15"
+bincode = "0.9"
+clap = "^2.29"
 matrixmultiply = "^0.1"
 nalgebra = { path = "../nalgebra" }
-rand = "^0.3"
-serde = "^0.8.19"
-serde_json = "^0.8"
-serde_derive = "^0.8.19"
-image = "0.10.3"
-byteorder = "0.5"
-rayon = "0.5"
-ctrlc = "2"
+rand = "0.4"
+serde = "1"
+serde_json = "1"
+serde_derive = "1"
+image = "0.18"
+byteorder = "1"
+rayon = "0.9"
+ctrlc = "3"
+
+[profile.release]
+debug = true

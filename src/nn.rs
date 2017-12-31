@@ -53,7 +53,6 @@ pub struct TrainConfig {
   pub sparsity_param: Option<f32>,
   pub sparsity_weight: Option<f32>,
   pub regularization_param: f32,
-  pub rayon_weight: f64,
 }
 
 pub type TrainData = Vec<Vec<f32>>;
@@ -117,10 +116,8 @@ impl Network {
   }
 
   pub fn split_data_sequences<R: ::rand::Rng>(rng: &mut R, all_data: TrainData, conf: &TrainConfig) -> (TrainData, TrainData) {
-    use ::rand::sample;
-
     let amt = (conf.validation_ratio * all_data.len() as f32) as usize;
-    let validation_idx = sample(rng, 0..all_data.len(), amt);
+    let validation_idx = ::rand::seq::sample_indices(rng, all_data.len(), amt);
 
     let mut train_data = Vec::with_capacity(all_data.len() - amt);
     let mut val_data = Vec::with_capacity(amt);
@@ -164,7 +161,7 @@ impl Network {
         epochs_since_validation_improvement < conf.sequential_validation_failures_required &&
         conf.max_epochs.map(|max| epoch < max).unwrap_or(true) {
       epoch += 1;
-      let batch_indices = ::rand::sample(rng, 0..train_data.len(), batch_size);
+      let batch_indices = ::rand::seq::sample_indices(rng, train_data.len(), batch_size);
 
       let average_activations = if conf.sparsity_weight.is_some() {
         train_data.par_iter()
@@ -183,7 +180,6 @@ impl Network {
       };
 
       let (weight_update_sum, bias_update_sum, mut train_error) = batch_indices.par_iter()
-        .weight(conf.rayon_weight)
         .map(|&idx| &train_data[idx])
         .map(|ref ex| DVector::from_slice(ex.len(), &ex[..]))
         .map(|input| {
@@ -223,12 +219,11 @@ impl Network {
       };
 
       let validation_error = validation_data.par_iter()
-        .weight(conf.rayon_weight)
         .map(|ref ex| {
           let mut layers = self.zero_layers();
           self.validation_error_of(&mut layers, DVector::from_slice(ex.len(), &ex[..]))
         })
-        .sum()
+        .sum::<f32>()
         / validation_data.len() as f32;
       let new_validation_cost = self.cost(validation_error, &average_activations_val[..], validation_data.len(), conf);
 
