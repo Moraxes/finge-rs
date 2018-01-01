@@ -16,9 +16,9 @@ pub struct Network {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct NetworkDefn {
-  layers: Vec<usize>,
-  activation_coeffs: Vec<f32>,
-  activation_fn: String,
+  pub layers: Vec<usize>,
+  pub activation_coeffs: Vec<f32>,
+  pub activation_fn: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
@@ -165,7 +165,7 @@ impl Network {
     if lambda != 0.0 { conf.regularization_param * self.weights.iter().map(|mat| mat.as_vector().iter().map(|w| w*w).sum::<f32>() / examples as f32).sum::<f32>() / self.weights.len() as f32 } else { 0.0 }
   }
 
-  pub fn train_autoencoder<T>(&mut self, mut train_batch_factory: T, validation_data: Option<Vec<Vec<f32>>>, conf: &TrainConfig, learning: Arc<AtomicBool>)
+  pub fn train_autoencoder<T>(&mut self, mut train_batch_factory: T, validation_data: Option<Vec<Vec<f32>>>, conf: &TrainConfig, learning: Option<Arc<AtomicBool>>)
       where T: FnMut() ->Option<Vec<Vec<f32>>>
   {
     self.train(|| train_batch_factory().map(|batch| batch.into_iter().map(|ex| (ex.clone(), ex)).collect()),
@@ -174,7 +174,7 @@ impl Network {
         learning)
   }
 
-  pub fn train<T>(&mut self, mut train_batch_factory: T, validation_data: Option<TrainData>, conf: &TrainConfig, learning: Arc<AtomicBool>)
+  pub fn train<T>(&mut self, mut train_batch_factory: T, validation_data: Option<TrainData>, conf: &TrainConfig, learning: Option<Arc<AtomicBool>>)
       where T: FnMut() -> Option<Vec<(Vec<f32>, Vec<f32>)>>
   {
     use rayon::prelude::*;
@@ -190,7 +190,7 @@ impl Network {
     let is_validating = validation_data.is_some();
     let validation_data_dvectors: Option<Vec<_>> = validation_data.map(|v| v.into_iter().map(|(i, o)| (DVector { at: i }, DVector { at: o })).collect());
 
-    while learning.load(Ordering::SeqCst) &&
+    while learning.as_ref().map(|l| l.load(Ordering::SeqCst)).unwrap_or(true) &&
         epochs_since_validation_improvement < conf.sequential_validation_failures_required &&
         conf.max_epochs.map(|max| epoch < max).unwrap_or(true) {
       epoch += 1;
@@ -287,11 +287,11 @@ impl Network {
     self.feed_forward(layers, &mut _li);
   }
 
-  pub fn eval(&self, example: DVector<f32>) -> Vec<f32> {
+  pub fn eval(&self, example: Vec<f32>) -> Vec<f32> {
     use na::Iterable;
     let mut layers = self.zero_layers();
     assert_eq!(layers[0].len(), example.len());
-    self.eval_impl(&mut layers, example);
+    self.eval_impl(&mut layers, DVector { at: example });
     layers.last().unwrap().iter().cloned().collect()
   }
 
