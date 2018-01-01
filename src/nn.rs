@@ -156,22 +156,25 @@ impl Network {
   }
 
   fn cost(&mut self, output_error: f32, examples: usize, conf: &TrainConfig) -> f32 {
+    if examples == 0 {
+      return 0.0;
+    }
     let lambda = conf.regularization_param;
 
     output_error +
     if lambda != 0.0 { conf.regularization_param * self.weights.iter().map(|mat| mat.as_vector().iter().map(|w| w*w).sum::<f32>() / examples as f32).sum::<f32>() / self.weights.len() as f32 } else { 0.0 }
   }
 
-  pub fn train_autoencoder<T>(&mut self, mut train_batch_factory: T, validation_data: Vec<Vec<f32>>, conf: &TrainConfig, learning: Arc<AtomicBool>)
+  pub fn train_autoencoder<T>(&mut self, mut train_batch_factory: T, validation_data: Option<Vec<Vec<f32>>>, conf: &TrainConfig, learning: Arc<AtomicBool>)
       where T: FnMut() ->Option<Vec<Vec<f32>>>
   {
     self.train(|| train_batch_factory().map(|batch| batch.into_iter().map(|ex| (ex.clone(), ex)).collect()),
-        validation_data.into_iter().map(|ex| (ex.clone(), ex)).collect(),
+        validation_data.map(|v| v.into_iter().map(|ex| (ex.clone(), ex)).collect()),
         conf,
         learning)
   }
 
-  pub fn train<T>(&mut self, mut train_batch_factory: T, validation_data: TrainData, conf: &TrainConfig, learning: Arc<AtomicBool>)
+  pub fn train<T>(&mut self, mut train_batch_factory: T, validation_data: Option<TrainData>, conf: &TrainConfig, learning: Arc<AtomicBool>)
       where T: FnMut() -> Option<Vec<(Vec<f32>, Vec<f32>)>>
   {
     use rayon::prelude::*;
@@ -184,7 +187,8 @@ impl Network {
 
     let mut validation_cost = ::std::f32::INFINITY;
 
-    let validation_data_dvectors: Vec<_> = validation_data.into_iter().map(|(i, o)| (DVector { at: i }, DVector { at: o })).collect();
+    let is_validating = validation_data.is_some();
+    let validation_data_dvectors: Option<Vec<_>> = validation_data.map(|v| v.into_iter().map(|(i, o)| (DVector { at: i }, DVector { at: o })).collect());
 
     while learning.load(Ordering::SeqCst) &&
         epochs_since_validation_improvement < conf.sequential_validation_failures_required &&
@@ -214,25 +218,31 @@ impl Network {
 
         let train_cost = self.cost(train_error, batch_len, conf);
 
-        let validation_error = validation_data_dvectors.par_iter()
+        let validation_error = validation_data_dvectors.as_ref().map(|v| v.par_iter()
           .map(|&(ref input, ref output)| {
             let mut layers = self.zero_layers();
             self.validation_error_of(&mut layers, input, output)
           })
           .sum::<f32>()
-          / validation_data_dvectors.len() as f32;
-        let new_validation_cost = self.cost(validation_error, validation_data_dvectors.len(), conf);
+          / v.len() as f32);
+        if let Some(verr) = validation_error {
+          let new_validation_cost = self.cost(verr, validation_data_dvectors.as_ref().map(|v| v.len()).unwrap_or(0), conf);
 
-        if new_validation_cost < validation_cost {
-          epochs_since_validation_improvement = 0;
-          best_known_net = self.clone();
-          validation_cost = new_validation_cost;
+          if new_validation_cost < validation_cost {
+            epochs_since_validation_improvement = 0;
+            best_known_net = self.clone();
+            validation_cost = new_validation_cost;
+          } else {
+            epochs_since_validation_improvement += 1;
+          }
+
+          if epoch % conf.epoch_log_period.unwrap_or(10) == 0 {
+            println!("#{} - train err: {}, val err: {} (last best: {}, stability: {})", epoch, train_cost, new_validation_cost, validation_cost, epochs_since_validation_improvement);
+          }
         } else {
-          epochs_since_validation_improvement += 1;
-        }
-
-        if epoch % conf.epoch_log_period.unwrap_or(10) == 0 {
-          println!("#{} - train err: {}, val err: {} (last best: {}, stability: {})", epoch, train_cost, new_validation_cost, validation_cost, epochs_since_validation_improvement);
+          if epoch % conf.epoch_log_period.unwrap_or(10) == 0 {
+            println!("#{} - train err: {}", epoch, train_cost);
+          }
         }
 
         if conf.momentum_rate.is_some() {
@@ -243,7 +253,9 @@ impl Network {
         break;
       }
     }
-    *self = best_known_net;
+    if is_validating {
+      *self = best_known_net;
+    }
   }
 
   fn compute_weight_update(&self, layers: &[DVector<f32>], delta: Vec<DVector<f32>>, conf: &TrainConfig) -> (Vec<DMatrix<f32>>, Vec<DVector<f32>>) {
