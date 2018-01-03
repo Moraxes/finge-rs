@@ -202,7 +202,8 @@ impl Network {
             let mut layers = self.zero_layers();
             *layers.get_mut(0).unwrap() = input.clone();
             let mut layer_inputs = self.zero_layers();
-            self.feed_forward(&mut layers, &mut layer_inputs);
+            let layers_len = layers.len();
+            self.feed_forward(&mut layers, &mut layer_inputs, layers_len);
             let out_layer_diff = layers.last().unwrap().clone() - output;
             let train_error = out_layer_diff.norm_squared() / out_layer_diff.len() as f32;
             let residual_errors = self.backpropagate(layer_inputs.clone(), out_layer_diff, conf);
@@ -276,29 +277,40 @@ impl Network {
   fn validation_error_of(&self, layers: &mut Vec<DVector<f32>>, input: &DVector<f32>, output: &DVector<f32>) -> f32 {
     debug_assert_eq!(layers[0].len(), input.len());
 
-    self.eval_impl(layers, input.clone());
+    let layers_len = layers.len();
+    self.eval_impl(layers, input.clone(), layers_len);
     
     (output.clone() - layers.last().unwrap().clone()).norm_squared() / layers.last().unwrap().len() as f32
   }
 
-  fn eval_impl(&self, layers: &mut Vec<DVector<f32>>, example: DVector<f32>) {
+  fn eval_impl(&self, layers: &mut Vec<DVector<f32>>, example: DVector<f32>, stop_at: usize) {
     layers[0] = example;
     let mut _li = self.zero_layers();
-    self.feed_forward(layers, &mut _li);
+    let layers_len = layers.len();
+    self.feed_forward(layers, &mut _li, layers_len);
   }
 
   pub fn eval(&self, example: Vec<f32>) -> Vec<f32> {
     use na::Iterable;
     let mut layers = self.zero_layers();
     assert_eq!(layers[0].len(), example.len());
-    self.eval_impl(&mut layers, DVector { at: example });
+    let layers_len = layers.len();    
+    self.eval_impl(&mut layers, DVector { at: example }, layers_len);
     layers.last().unwrap().iter().cloned().collect()
   }
 
-  fn feed_forward(&self, layers: &mut Vec<DVector<f32>>, layer_inputs: &mut Vec<DVector<f32>>) {
+  pub fn eval_to_layer(&self, example: Vec<f32>, layer: usize) -> Vec<f32> {
+    use na::Iterable;
+    let mut layers = self.zero_layers();
+    assert_eq!(layers[0].len(), example.len());
+    self.eval_impl(&mut layers, DVector { at: example }, layer);
+    layers[layer - 1].iter().cloned().collect()
+  }
+
+  fn feed_forward(&self, layers: &mut Vec<DVector<f32>>, layer_inputs: &mut Vec<DVector<f32>>, stop_at: usize) {
     use na::Iterable;
 
-    for it in 0..(layers.len() - 1) {
+    for it in 0..(stop_at - 1) {
       let input = {
         let mut clone = layers[it].clone();
         clone *= &self.weights[it + 1];
